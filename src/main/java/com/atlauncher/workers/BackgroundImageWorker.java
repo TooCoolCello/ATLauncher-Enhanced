@@ -20,6 +20,7 @@ package com.atlauncher.workers;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.io.BufferedInputStream;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.ExecutionException;
@@ -30,6 +31,7 @@ import javax.swing.JLabel;
 import javax.swing.SwingWorker;
 
 import com.atlauncher.FileSystem;
+import com.atlauncher.managers.LogManager;
 import com.atlauncher.network.Download;
 import com.atlauncher.network.DownloadException;
 
@@ -46,13 +48,41 @@ public class BackgroundImageWorker extends SwingWorker<ImageIcon, Object> {
         this.height = height;
     }
 
+    /**
+     * The cache file name for an image URL, or null when the URL has no usable characters. An empty name would
+     * resolve to the cache directory itself.
+     */
+    static String cacheKey(String url) {
+        if (url == null) {
+            return null;
+        }
+
+        String key = url.replaceAll("[^A-Za-z0-9]", "");
+        return key.isEmpty() ? null : key;
+    }
+
     @Override
     protected ImageIcon doInBackground() throws Exception {
-        Path path = FileSystem.REMOTE_IMAGE_CACHE.resolve(this.url.replaceAll("[^A-Za-z0-9]", ""));
+        String key = cacheKey(this.url);
+        if (key == null) {
+            return null;
+        }
 
+        Path path = FileSystem.REMOTE_IMAGE_CACHE.resolve(key);
+
+        try {
+            return loadImage(path);
+        } catch (IOException e) {
+            // images are optional, so a failed download or unreadable cache file just leaves the placeholder
+            LogManager.debug("Failed to load image " + this.url + ": " + e);
+            return null;
+        }
+    }
+
+    private ImageIcon loadImage(Path path) throws IOException {
         Download download = Download.build().setUrl(this.url).ignoreFailures().downloadTo(path);
 
-        if (!Files.exists(path)) {
+        if (!Files.isRegularFile(path)) {
             try {
                 download.downloadFile();
             } catch (DownloadException ignored) {
@@ -60,7 +90,7 @@ public class BackgroundImageWorker extends SwingWorker<ImageIcon, Object> {
             }
         }
 
-        if (Files.exists(path)) {
+        if (Files.isRegularFile(path)) {
             try (BufferedInputStream inputStream = new BufferedInputStream(Files.newInputStream(path))) {
                 BufferedImage sourceImage = ImageIO.read(inputStream);
                 if (sourceImage != null) {
@@ -94,8 +124,11 @@ public class BackgroundImageWorker extends SwingWorker<ImageIcon, Object> {
             if (icon != null) {
                 label.setIcon(icon);
             }
-        } catch (InterruptedException | ExecutionException e) {
-            e.printStackTrace();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause() == null ? e : e.getCause();
+            LogManager.warn("Failed to load image: " + cause.getClass().getSimpleName() + ": " + cause.getMessage());
         } finally {
             label.setVisible(true);
         }
