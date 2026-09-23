@@ -21,6 +21,7 @@ import java.awt.BorderLayout;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
 import java.awt.Window;
 import java.util.ArrayList;
 import java.util.List;
@@ -32,6 +33,7 @@ import java.util.stream.Collectors;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
+import javax.swing.ButtonGroup;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JDialog;
@@ -40,6 +42,7 @@ import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextField;
+import javax.swing.JToggleButton;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 import javax.swing.event.HyperlinkEvent;
@@ -50,6 +53,7 @@ import com.atlauncher.App;
 import com.atlauncher.builders.HTMLBuilder;
 import com.atlauncher.constants.Constants;
 import com.atlauncher.data.AddModRestriction;
+import com.atlauncher.data.AddModsViewMode;
 import com.atlauncher.data.DisableableMod;
 import com.atlauncher.data.Instance;
 import com.atlauncher.data.ModManagement;
@@ -99,6 +103,10 @@ public final class AddModsDialog extends JDialog {
     private final JComboBox<Integer> pageSizeComboBox = new JComboBox<>();
     // bumped for every fetch so only the latest one may update the UI
     private final AtomicInteger fetchGeneration = new AtomicInteger();
+    private final JToggleButton cardsViewButton = new JToggleButton(GetText.tr("Cards"));
+    private final JToggleButton listViewButton = new JToggleButton(GetText.tr("List"));
+    // redraws the results currently shown (EDT only); null while loading or before any results
+    private Runnable rerenderResults = null;
 
     // #. {0} is the loader api (Fabric API/QSL)
     private final JButton installFabricApiButton = new JButton(GetText.tr("Install {0}", "Fabric API"));
@@ -674,6 +682,16 @@ public final class AddModsDialog extends JDialog {
             getMods();
         });
 
+        ButtonGroup viewModeGroup = new ButtonGroup();
+        viewModeGroup.add(cardsViewButton);
+        viewModeGroup.add(listViewButton);
+        (App.settings.addModsViewMode == AddModsViewMode.LIST ? listViewButton : cardsViewButton).setSelected(true);
+        cardsViewButton.addActionListener(e -> setViewMode(AddModsViewMode.CARDS));
+        listViewButton.addActionListener(e -> setViewMode(AddModsViewMode.LIST));
+
+        bottomButtonsPanel.add(cardsViewButton);
+        bottomButtonsPanel.add(listViewButton);
+        bottomButtonsPanel.add(Box.createHorizontalStrut(10));
         bottomButtonsPanel.add(prevButton);
         bottomButtonsPanel.add(nextButton);
         bottomButtonsPanel.add(Box.createHorizontalStrut(10));
@@ -766,6 +784,7 @@ public final class AddModsDialog extends JDialog {
 
     private void setLoading(boolean loading) {
         if (loading) {
+            rerenderResults = null;
             contentPanel.removeAll();
             contentPanel.setLayout(new BorderLayout());
             contentPanel.add(new LoadingPanel(), BorderLayout.CENTER);
@@ -997,7 +1016,46 @@ public final class AddModsDialog extends JDialog {
         getMods();
     }
 
+    /**
+     * Switches between cards and list rows, redrawing the current results in place: no fetch, and the page and
+     * Next/Previous state stay as they are.
+     */
+    private void setViewMode(AddModsViewMode mode) {
+        if (App.settings.addModsViewMode == mode) {
+            return;
+        }
+
+        App.settings.addModsViewMode = mode;
+        App.settings.save();
+
+        if (rerenderResults != null) {
+            rerenderResults.run();
+        }
+    }
+
+    /**
+     * List rows fill the width and stack from the top; cards keep using gbc as before (ignored by WrapLayout).
+     */
+    private static void useListRowConstraints(GridBagConstraints gbc) {
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.anchor = GridBagConstraints.NORTH;
+        gbc.weighty = 0;
+        gbc.insets.set(0, 0, 0, 0);
+    }
+
+    /**
+     * Takes the space below the last list row so rows stay at the top.
+     */
+    private void addListFiller(GridBagConstraints gbc) {
+        gbc.weighty = 1.0;
+        gbc.fill = GridBagConstraints.BOTH;
+        contentPanel.add(Box.createGlue(), gbc);
+    }
+
     private void setCurseForgeMods(List<CurseForgeProject> mods, boolean hasNext) {
+        rerenderResults = () -> setCurseForgeMods(mods, hasNext);
+        boolean listView = App.settings.addModsViewMode == AddModsViewMode.LIST;
+
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.gridx = 0;
         gbc.gridy = 0;
@@ -1014,7 +1072,12 @@ public final class AddModsDialog extends JDialog {
             prevButton.setEnabled(page > 0);
             nextButton.setEnabled(hasNext);
 
-            contentPanel.setLayout(new WrapLayout());
+            if (listView) {
+                contentPanel.setLayout(new GridBagLayout());
+                useListRowConstraints(gbc);
+            } else {
+                contentPanel.setLayout(new WrapLayout());
+            }
 
             mods.forEach(mod -> {
                 CurseForgeProject castMod = mod;
@@ -1073,10 +1136,14 @@ public final class AddModsDialog extends JDialog {
                             installForgifiedFabricApiButton.setVisible(true);
                         }
                     }
-                }), gbc);
+                }, listView), gbc);
 
                 gbc.gridy++;
             });
+
+            if (listView) {
+                addListFiller(gbc);
+            }
         }
 
         SwingUtilities.invokeLater(() -> jscrollPane.getVerticalScrollBar().setValue(0));
@@ -1086,6 +1153,9 @@ public final class AddModsDialog extends JDialog {
     }
 
     private void setModrinthMods(List<ModrinthSearchHit> hits, boolean hasNext) {
+        rerenderResults = () -> setModrinthMods(hits, hasNext);
+        boolean listView = App.settings.addModsViewMode == AddModsViewMode.LIST;
+
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.gridx = 0;
         gbc.gridy = 0;
@@ -1102,7 +1172,12 @@ public final class AddModsDialog extends JDialog {
             prevButton.setEnabled(page > 0);
             nextButton.setEnabled(hasNext);
 
-            contentPanel.setLayout(new WrapLayout());
+            if (listView) {
+                contentPanel.setLayout(new GridBagLayout());
+                useListRowConstraints(gbc);
+            } else {
+                contentPanel.setLayout(new WrapLayout());
+            }
 
             hits.forEach(mod -> {
                 ModrinthSearchHit castMod = mod;
@@ -1191,10 +1266,14 @@ public final class AddModsDialog extends JDialog {
                             installForgifiedFabricApiButton.setVisible(true);
                         }
                     }
-                }), gbc);
+                }, listView), gbc);
 
                 gbc.gridy++;
             });
+
+            if (listView) {
+                addListFiller(gbc);
+            }
         }
 
         SwingUtilities.invokeLater(() -> jscrollPane.getVerticalScrollBar().setValue(0));

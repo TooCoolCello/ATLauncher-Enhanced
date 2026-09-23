@@ -105,6 +105,7 @@ public class Settings {
     public boolean dontCheckModsOnCurseForge = false;
     public boolean dontCheckModsOnModrinth = false;
     public int addModsPageSize = DEFAULT_ADD_MODS_PAGE_SIZE;
+    public AddModsViewMode addModsViewMode = AddModsViewMode.CARDS;
     public boolean scanModsOnLaunch = true;
 
     // Java/Minecraft
@@ -298,6 +299,7 @@ public class Settings {
         validateAddModRestriction();
 
         validateAddModsPageSize();
+        validateAddModsViewMode();
 
         validateAnalyticsClientId();
 
@@ -388,6 +390,13 @@ public class Settings {
     void validateAddModsPageSize() {
         if (!ADD_MODS_PAGE_SIZES.contains(addModsPageSize)) {
             addModsPageSize = DEFAULT_ADD_MODS_PAGE_SIZE;
+        }
+    }
+
+    // unknown values in settings.json are read as null
+    void validateAddModsViewMode() {
+        if (addModsViewMode == null) {
+            addModsViewMode = AddModsViewMode.CARDS;
         }
     }
 
