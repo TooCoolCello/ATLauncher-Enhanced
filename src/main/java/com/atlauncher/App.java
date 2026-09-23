@@ -82,6 +82,7 @@ import com.atlauncher.managers.ServerManager;
 import com.atlauncher.network.Download;
 import com.atlauncher.network.ErrorReporting;
 import com.atlauncher.themes.ATLauncherLaf;
+import com.atlauncher.utils.DialogDebugMonitor;
 import com.atlauncher.utils.Java;
 import com.atlauncher.utils.OS;
 import com.atlauncher.utils.Utils;
@@ -348,6 +349,9 @@ public class App {
 
         console = new LauncherConsole();
         LogManager.start();
+
+        // no-op unless -Datlauncher.dialogDebug=true or --debug
+        DialogDebugMonitor.startIfEnabled();
 
         if (!noConsole && settings.enableConsole) {
             // Show the console if enabled.
