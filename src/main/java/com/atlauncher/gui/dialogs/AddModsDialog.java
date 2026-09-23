@@ -25,6 +25,8 @@ import java.awt.Window;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 
 import javax.swing.BorderFactory;
@@ -52,7 +54,9 @@ import com.atlauncher.data.DisableableMod;
 import com.atlauncher.data.Instance;
 import com.atlauncher.data.ModManagement;
 import com.atlauncher.data.ModPlatform;
+import com.atlauncher.data.Settings;
 import com.atlauncher.data.curseforge.CurseForgeCategoryForGame;
+import com.atlauncher.data.curseforge.CurseForgeCoreApiResponse;
 import com.atlauncher.data.curseforge.CurseForgeProject;
 import com.atlauncher.data.minecraft.loaders.LoaderVersion;
 import com.atlauncher.data.modrinth.ModrinthCategory;
@@ -92,6 +96,9 @@ public final class AddModsDialog extends JDialog {
     private final JComboBox<ComboItem<String>> sectionComboBox = new JComboBox<>();
     private final JComboBox<ComboItem<String>> sortComboBox = new JComboBox<>();
     private final JComboBox<ComboItem<String>> categoriesComboBox = new JComboBox<>();
+    private final JComboBox<Integer> pageSizeComboBox = new JComboBox<>();
+    // bumped for every fetch so only the latest one may update the UI
+    private final AtomicInteger fetchGeneration = new AtomicInteger();
 
     // #. {0} is the loader api (Fabric API/QSL)
     private final JButton installFabricApiButton = new JButton(GetText.tr("Install {0}", "Fabric API"));
@@ -650,8 +657,28 @@ public final class AddModsDialog extends JDialog {
         nextButton.setEnabled(false);
         nextButton.addActionListener(e -> goToNextPage());
 
+        for (Integer pageSize : Settings.ADD_MODS_PAGE_SIZES) {
+            pageSizeComboBox.addItem(pageSize);
+        }
+        pageSizeComboBox.setSelectedItem(App.settings.addModsPageSize);
+        pageSizeComboBox.addActionListener(e -> {
+            Integer selected = (Integer) pageSizeComboBox.getSelectedItem();
+            if (selected == null || selected == App.settings.addModsPageSize) {
+                return;
+            }
+
+            App.settings.addModsPageSize = selected;
+            App.settings.save();
+
+            page = 0;
+            getMods();
+        });
+
         bottomButtonsPanel.add(prevButton);
         bottomButtonsPanel.add(nextButton);
+        bottomButtonsPanel.add(Box.createHorizontalStrut(10));
+        bottomButtonsPanel.add(new JLabel(GetText.tr("Per page:")));
+        bottomButtonsPanel.add(pageSizeComboBox);
 
         platformMessageLabel.setForeground(UIManager.getColor("yellow"));
         bottomPanel.add(platformMessageLabel, BorderLayout.NORTH);
@@ -776,6 +803,8 @@ public final class AddModsDialog extends JDialog {
 
     @SuppressWarnings("unchecked")
     private void getMods() {
+        int generation = fetchGeneration.incrementAndGet();
+
         setLoading(true);
         prevButton.setEnabled(false);
         nextButton.setEnabled(false);
@@ -788,6 +817,10 @@ public final class AddModsDialog extends JDialog {
         String sortValue = Optional.ofNullable((ComboItem<String>) sortComboBox.getSelectedItem())
                 .map(ComboItem::getValue)
                 .orElse(selectedModPlatform == ModPlatform.CURSEFORGE ? "Popularity" : "relevance");
+        String categoryValue = categoriesComboBox.getSelectedItem() == null ? null
+                : ((ComboItem<String>) categoriesComboBox.getSelectedItem()).getValue();
+        int requestPage = page;
+        int pageSize = App.settings.addModsPageSize;
 
         new Thread(() -> {
             if (selectedModPlatform == ModPlatform.CURSEFORGE) {
@@ -795,73 +828,60 @@ public final class AddModsDialog extends JDialog {
                         ? instanceOrServer.getMinecraftVersion()
                         : null;
 
+                BiFunction<Integer, Integer, CurseForgeCoreApiResponse<List<CurseForgeProject>>> search;
                 if (sectionValue.equals("Data Packs")) {
-                    setCurseForgeMods(CurseForgeApi.searchDataPacks(versionToSearchFor, query, page,
-                            sortValue,
-                            categoriesComboBox.getSelectedItem() == null ? null
-                                    : ((ComboItem<String>) categoriesComboBox.getSelectedItem()).getValue()));
+                    search = (offset, limit) -> CurseForgeApi.searchDataPacks(versionToSearchFor, query, offset,
+                            limit, sortValue, categoryValue);
                 } else if (sectionValue.equals("Resource Packs")) {
-                    setCurseForgeMods(CurseForgeApi.searchResourcePacks(query, page,
-                            sortValue,
-                            categoriesComboBox.getSelectedItem() == null ? null
-                                    : ((ComboItem<String>) categoriesComboBox.getSelectedItem()).getValue()));
+                    search = (offset, limit) -> CurseForgeApi.searchResourcePacks(query, offset, limit, sortValue,
+                            categoryValue);
                 } else if (sectionValue.equals("Shaders")) {
-                    setCurseForgeMods(CurseForgeApi.searchShaderPacks(query, page,
-                            sortValue,
-                            categoriesComboBox.getSelectedItem() == null ? null
-                                    : ((ComboItem<String>) categoriesComboBox.getSelectedItem()).getValue()));
+                    search = (offset, limit) -> CurseForgeApi.searchShaderPacks(query, offset, limit, sortValue,
+                            categoryValue);
                 } else if (sectionValue.equals("Worlds")) {
-                    setCurseForgeMods(CurseForgeApi.searchWorlds(versionToSearchFor, query, page,
-                            sortValue,
-                            categoriesComboBox.getSelectedItem() == null ? null
-                                    : ((ComboItem<String>) categoriesComboBox.getSelectedItem()).getValue()));
+                    search = (offset, limit) -> CurseForgeApi.searchWorlds(versionToSearchFor, query, offset, limit,
+                            sortValue, categoryValue);
                 } else if (sectionValue.equals("Plugins")) {
-                    setCurseForgeMods(CurseForgeApi.searchPlugins(versionToSearchFor, query, page,
-                            sortValue,
-                            categoriesComboBox.getSelectedItem() == null ? null
-                                    : ((ComboItem<String>) categoriesComboBox.getSelectedItem()).getValue()));
+                    search = (offset, limit) -> CurseForgeApi.searchPlugins(versionToSearchFor, query, offset, limit,
+                            sortValue, categoryValue);
                 } else {
                     if (instanceOrServer.getLoaderVersion().isFabric()
                             || instanceOrServer.getLoaderVersion().isLegacyFabric()) {
-                        setCurseForgeMods(CurseForgeApi.searchModsForFabric(versionToSearchFor, query, page,
-                                sortValue,
-                                categoriesComboBox.getSelectedItem() == null ? null
-                                        : ((ComboItem<String>) categoriesComboBox.getSelectedItem()).getValue()));
+                        search = (offset, limit) -> CurseForgeApi.searchModsForFabric(versionToSearchFor, query,
+                                offset, limit, sortValue, categoryValue);
                     } else if (instanceOrServer.getLoaderVersion().isQuilt()) {
-                        setCurseForgeMods(CurseForgeApi.searchModsForQuilt(versionToSearchFor, query, page,
-                                sortValue,
-                                categoriesComboBox.getSelectedItem() == null ? null
-                                        : ((ComboItem<String>) categoriesComboBox.getSelectedItem()).getValue()));
+                        search = (offset, limit) -> CurseForgeApi.searchModsForQuilt(versionToSearchFor, query,
+                                offset, limit, sortValue, categoryValue);
                     } else if (instanceOrServer.isForgeLikeAndHasInstalledSinytraConnector()) {
                         if (instanceOrServer.getLoaderVersion().isForge()) {
-                            setCurseForgeMods(CurseForgeApi.searchModsForForgeOrFabric(versionToSearchFor, query, page,
-                                    sortValue,
-                                    ((ComboItem<String>) categoriesComboBox.getSelectedItem()) == null ? null
-                                            : ((ComboItem<String>) categoriesComboBox.getSelectedItem()).getValue()));
+                            search = (offset, limit) -> CurseForgeApi.searchModsForForgeOrFabric(versionToSearchFor,
+                                    query, offset, limit, sortValue, categoryValue);
                         } else {
-                            setCurseForgeMods(CurseForgeApi.searchModsForNeoForgeOrFabric(versionToSearchFor, query,
-                                    page,
-                                    sortValue,
-                                    ((ComboItem<String>) categoriesComboBox.getSelectedItem()) == null ? null
-                                            : ((ComboItem<String>) categoriesComboBox.getSelectedItem()).getValue()));
+                            search = (offset, limit) -> CurseForgeApi.searchModsForNeoForgeOrFabric(
+                                    versionToSearchFor, query, offset, limit, sortValue, categoryValue);
                         }
                     } else if (instanceOrServer.getLoaderVersion().isForge()) {
-                        setCurseForgeMods(CurseForgeApi.searchModsForForge(versionToSearchFor, query, page,
-                                sortValue,
-                                categoriesComboBox.getSelectedItem() == null ? null
-                                        : ((ComboItem<String>) categoriesComboBox.getSelectedItem()).getValue()));
+                        search = (offset, limit) -> CurseForgeApi.searchModsForForge(versionToSearchFor, query,
+                                offset, limit, sortValue, categoryValue);
                     } else if (instanceOrServer.getLoaderVersion().isNeoForge()) {
-                        setCurseForgeMods(CurseForgeApi.searchModsForNeoForge(versionToSearchFor, query, page,
-                                sortValue,
-                                categoriesComboBox.getSelectedItem() == null ? null
-                                        : ((ComboItem<String>) categoriesComboBox.getSelectedItem()).getValue()));
+                        search = (offset, limit) -> CurseForgeApi.searchModsForNeoForge(versionToSearchFor, query,
+                                offset, limit, sortValue, categoryValue);
                     } else {
-                        setCurseForgeMods(CurseForgeApi.searchMods(versionToSearchFor, query, page,
-                                sortValue,
-                                categoriesComboBox.getSelectedItem() == null ? null
-                                        : ((ComboItem<String>) categoriesComboBox.getSelectedItem()).getValue()));
+                        search = (offset, limit) -> CurseForgeApi.searchMods(versionToSearchFor, query, offset,
+                                limit, sortValue, categoryValue);
                     }
                 }
+
+                AddModsPagination.Page<CurseForgeProject> result = AddModsPagination.fetchPage(
+                        AddModsPagination.planRequests(requestPage, pageSize, CurseForgeApi.MAX_SEARCH_PAGE_SIZE,
+                                CurseForgeApi.MAX_SEARCH_INDEX),
+                        search, response -> response.data,
+                        response -> response.pagination == null ? -1 : response.pagination.totalCount,
+                        project -> project.id);
+                boolean hasNext = result != null && AddModsPagination.curseForgeHasNext(requestPage, pageSize,
+                        result.fetched, result.total, CurseForgeApi.MAX_SEARCH_INDEX);
+
+                runIfCurrent(generation, () -> setCurseForgeMods(result == null ? null : result.items, hasNext));
             } else if (selectedModPlatform == ModPlatform.MODRINTH) {
                 List<String> versionsToSearchFor = new ArrayList<>();
 
@@ -880,77 +900,84 @@ public final class AddModsDialog extends JDialog {
                     versionsToSearchFor = null;
                 }
 
+                List<String> versions = versionsToSearchFor;
+                BiFunction<Integer, Integer, ModrinthSearchResult> search = null;
                 if (sectionValue.equals("Data Packs")) {
-                    setModrinthMods(ModrinthApi.searchDataPacks(versionsToSearchFor, query, page,
-                            sortValue,
-                            categoriesComboBox.getSelectedItem() == null ? null
-                                    : ((ComboItem<String>) categoriesComboBox.getSelectedItem()).getValue()));
+                    search = (offset, limit) -> ModrinthApi.searchDataPacks(versions, query, offset, limit,
+                            sortValue, categoryValue);
                 } else if (sectionValue.equals("Resource Packs")) {
-                    setModrinthMods(ModrinthApi.searchResourcePacks(versionsToSearchFor, query, page,
-                            sortValue,
-                            categoriesComboBox.getSelectedItem() == null ? null
-                                    : ((ComboItem<String>) categoriesComboBox.getSelectedItem()).getValue()));
+                    search = (offset, limit) -> ModrinthApi.searchResourcePacks(versions, query, offset, limit,
+                            sortValue, categoryValue);
                 } else if (sectionValue.equals("Shaders")) {
-                    setModrinthMods(ModrinthApi.searchShaders(versionsToSearchFor, query, page,
-                            sortValue,
-                            categoriesComboBox.getSelectedItem() == null ? null
-                                    : ((ComboItem<String>) categoriesComboBox.getSelectedItem()).getValue()));
+                    search = (offset, limit) -> ModrinthApi.searchShaders(versions, query, offset, limit,
+                            sortValue, categoryValue);
                 } else if (sectionValue.equals("Plugins")) {
                     if (instanceOrServer.getLoaderVersion().isPaper()) {
-                        setModrinthMods(ModrinthApi.searchPluginsForPaper(versionsToSearchFor, query, page,
-                                sortValue,
-                                categoriesComboBox.getSelectedItem() == null ? null
-                                        : ((ComboItem<String>) categoriesComboBox.getSelectedItem()).getValue()));
+                        search = (offset, limit) -> ModrinthApi.searchPluginsForPaper(versions, query, offset, limit,
+                                sortValue, categoryValue);
                     } else if (instanceOrServer.getLoaderVersion().isPurpur()) {
-                        setModrinthMods(ModrinthApi.searchPluginsForPurpur(versionsToSearchFor, query, page,
-                                sortValue,
-                                categoriesComboBox.getSelectedItem() == null ? null
-                                        : ((ComboItem<String>) categoriesComboBox.getSelectedItem()).getValue()));
+                        search = (offset, limit) -> ModrinthApi.searchPluginsForPurpur(versions, query, offset,
+                                limit, sortValue, categoryValue);
                     }
                 } else {
                     if (instanceOrServer.getLoaderVersion().isFabric()) {
-                        setModrinthMods(ModrinthApi.searchModsForFabric(versionsToSearchFor, query, page,
-                                sortValue,
-                                categoriesComboBox.getSelectedItem() == null ? null
-                                        : ((ComboItem<String>) categoriesComboBox.getSelectedItem()).getValue()));
+                        search = (offset, limit) -> ModrinthApi.searchModsForFabric(versions, query, offset, limit,
+                                sortValue, categoryValue);
                     } else if (instanceOrServer.getLoaderVersion().isLegacyFabric()) {
-                        setModrinthMods(ModrinthApi.searchModsForLegacyFabric(versionsToSearchFor, query, page,
-                                sortValue,
-                                categoriesComboBox.getSelectedItem() == null ? null
-                                        : ((ComboItem<String>) categoriesComboBox.getSelectedItem()).getValue()));
+                        search = (offset, limit) -> ModrinthApi.searchModsForLegacyFabric(versions, query, offset,
+                                limit, sortValue, categoryValue);
                     } else if (instanceOrServer.getLoaderVersion().isQuilt()) {
-                        setModrinthMods(ModrinthApi.searchModsForQuiltOrFabric(versionsToSearchFor, query, page,
-                                sortValue,
-                                categoriesComboBox.getSelectedItem() == null ? null
-                                        : ((ComboItem<String>) categoriesComboBox.getSelectedItem()).getValue()));
+                        search = (offset, limit) -> ModrinthApi.searchModsForQuiltOrFabric(versions, query, offset,
+                                limit, sortValue, categoryValue);
                     } else if (instanceOrServer.isForgeLikeAndHasInstalledSinytraConnector()) {
                         if (instanceOrServer.getLoaderVersion().isForge()) {
-                            setModrinthMods(ModrinthApi.searchModsForForgeOrFabric(versionsToSearchFor, query, page,
-                                    sortValue,
-                                    ((ComboItem<String>) categoriesComboBox.getSelectedItem()) == null ? null
-                                            : ((ComboItem<String>) categoriesComboBox.getSelectedItem()).getValue()));
+                            search = (offset, limit) -> ModrinthApi.searchModsForForgeOrFabric(versions, query,
+                                    offset, limit, sortValue, categoryValue);
                         } else {
-                            setModrinthMods(ModrinthApi.searchModsForNeoForgeOrFabric(versionsToSearchFor, query, page,
-                                    sortValue,
-                                    ((ComboItem<String>) categoriesComboBox.getSelectedItem()) == null ? null
-                                            : ((ComboItem<String>) categoriesComboBox.getSelectedItem()).getValue()));
+                            search = (offset, limit) -> ModrinthApi.searchModsForNeoForgeOrFabric(versions, query,
+                                    offset, limit, sortValue, categoryValue);
                         }
                     } else if (instanceOrServer.getLoaderVersion().isForge()) {
-                        setModrinthMods(ModrinthApi.searchModsForForge(versionsToSearchFor, query, page,
-                                sortValue,
-                                categoriesComboBox.getSelectedItem() == null ? null
-                                        : ((ComboItem<String>) categoriesComboBox.getSelectedItem()).getValue()));
+                        search = (offset, limit) -> ModrinthApi.searchModsForForge(versions, query, offset, limit,
+                                sortValue, categoryValue);
                     } else if (instanceOrServer.getLoaderVersion().isNeoForge()) {
-                        setModrinthMods(ModrinthApi.searchModsForNeoForge(versionsToSearchFor, query, page,
-                                sortValue,
-                                categoriesComboBox.getSelectedItem() == null ? null
-                                        : ((ComboItem<String>) categoriesComboBox.getSelectedItem()).getValue()));
+                        search = (offset, limit) -> ModrinthApi.searchModsForNeoForge(versions, query, offset, limit,
+                                sortValue, categoryValue);
                     }
+                }
+
+                // no search for this loader/section combination, as before
+                if (search != null) {
+                    AddModsPagination.Page<ModrinthSearchHit> result = AddModsPagination.fetchPage(
+                            AddModsPagination.planRequests(requestPage, pageSize, ModrinthApi.MAX_SEARCH_LIMIT,
+                                    Integer.MAX_VALUE),
+                            search, response -> response.hits, response -> response.totalHits,
+                            hit -> hit.projectId);
+                    boolean hasNext = result != null && AddModsPagination.modrinthHasNext(requestPage, pageSize,
+                            result.fetched, result.total);
+
+                    runIfCurrent(generation, () -> setModrinthMods(result == null ? null : result.items, hasNext));
                 }
             }
 
-            setLoading(false);
+            runIfCurrent(generation, () -> setLoading(false));
         }).start();
+    }
+
+    /**
+     * Schedules a fetch's UI update on the EDT, dropping it if a newer fetch has started so a slow response can't
+     * replace newer results.
+     */
+    private void runIfCurrent(int generation, Runnable update) {
+        if (generation != fetchGeneration.get()) {
+            return;
+        }
+
+        SwingUtilities.invokeLater(() -> {
+            if (generation == fetchGeneration.get()) {
+                update.run();
+            }
+        });
     }
 
     private void loadDefaultMods() {
@@ -970,7 +997,7 @@ public final class AddModsDialog extends JDialog {
         getMods();
     }
 
-    private void setCurseForgeMods(List<CurseForgeProject> mods) {
+    private void setCurseForgeMods(List<CurseForgeProject> mods, boolean hasNext) {
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.gridx = 0;
         gbc.gridy = 0;
@@ -985,7 +1012,7 @@ public final class AddModsDialog extends JDialog {
             contentPanel.add(new NoCurseModsPanel(!this.searchField.getText().isEmpty()), BorderLayout.CENTER);
         } else {
             prevButton.setEnabled(page > 0);
-            nextButton.setEnabled(mods.size() == Constants.CURSEFORGE_PAGINATION_SIZE);
+            nextButton.setEnabled(hasNext);
 
             contentPanel.setLayout(new WrapLayout());
 
@@ -1058,7 +1085,7 @@ public final class AddModsDialog extends JDialog {
         repaint();
     }
 
-    private void setModrinthMods(ModrinthSearchResult searchResult) {
+    private void setModrinthMods(List<ModrinthSearchHit> hits, boolean hasNext) {
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.gridx = 0;
         gbc.gridy = 0;
@@ -1068,16 +1095,16 @@ public final class AddModsDialog extends JDialog {
 
         contentPanel.removeAll();
 
-        if (searchResult == null || searchResult.hits.isEmpty()) {
+        if (hits == null || hits.isEmpty()) {
             contentPanel.setLayout(new BorderLayout());
             contentPanel.add(new NoCurseModsPanel(!this.searchField.getText().isEmpty()), BorderLayout.CENTER);
         } else {
             prevButton.setEnabled(page > 0);
-            nextButton.setEnabled((searchResult.offset + searchResult.limit) < searchResult.totalHits);
+            nextButton.setEnabled(hasNext);
 
             contentPanel.setLayout(new WrapLayout());
 
-            searchResult.hits.forEach(mod -> {
+            hits.forEach(mod -> {
                 ModrinthSearchHit castMod = mod;
                 String sectionValue = Optional.ofNullable((ComboItem<String>) sectionComboBox.getSelectedItem())
                         .map(ComboItem::getValue)

@@ -58,6 +58,9 @@ import okhttp3.RequestBody;
  * Various utility methods for interacting with the Modrinth API.
  */
 public class ModrinthApi {
+    // search API limit: results per request
+    public static final int MAX_SEARCH_LIMIT = 100;
+
     private static Headers getHeaders() {
         if (App.settings.modrinthApiKey == null || App.settings.modrinthApiKey.isEmpty()) {
             return null;
@@ -68,12 +71,22 @@ public class ModrinthApi {
 
     public static ModrinthSearchResult searchModrinth(List<String> gameVersions, String query, int page, String index,
         List<List<String>> categories, ModrinthProjectType projectType) {
+        return searchModrinth(gameVersions, query, page * Constants.MODRINTH_PAGINATION_SIZE,
+            Constants.MODRINTH_PAGINATION_SIZE, index, categories, projectType);
+    }
+
+    /**
+     * Searches from the given result offset for up to limit results (at most {@link #MAX_SEARCH_LIMIT}). Returns
+     * null if the request failed.
+     */
+    public static ModrinthSearchResult searchModrinth(List<String> gameVersions, String query, int offset, int limit,
+        String index, List<List<String>> categories, ModrinthProjectType projectType) {
         try {
             List<List<String>> facets = new ArrayList<>();
 
             String url = String.format(Locale.ENGLISH, "%s/search?limit=%d&offset=%d&query=%s&index=%s",
                 Constants.MODRINTH_API_URL,
-                Constants.MODRINTH_PAGINATION_SIZE, page * Constants.MODRINTH_PAGINATION_SIZE,
+                limit, offset,
                 URLEncoder.encode(query, StandardCharsets.UTF_8.name()), index);
 
             if (gameVersions != null && !gameVersions.isEmpty()) {
@@ -108,21 +121,39 @@ public class ModrinthApi {
 
     public static ModrinthSearchResult searchResourcePacks(List<String> gameVersions, String query, int page,
         String sort, String category) {
+        return searchResourcePacks(gameVersions, query, page * Constants.MODRINTH_PAGINATION_SIZE,
+            Constants.MODRINTH_PAGINATION_SIZE, sort, category);
+    }
+
+    public static ModrinthSearchResult searchResourcePacks(List<String> gameVersions, String query, int offset,
+        int limit, String sort, String category) {
         List<List<String>> categories = category == null ? null
             : Collections.singletonList(Collections.singletonList(category));
 
-        return searchModrinth(gameVersions, query, page, sort, categories, ModrinthProjectType.RESOURCEPACK);
+        return searchModrinth(gameVersions, query, offset, limit, sort, categories, ModrinthProjectType.RESOURCEPACK);
     }
 
     public static ModrinthSearchResult searchShaders(List<String> gameVersions, String query, int page,
         String sort, String category) {
+        return searchShaders(gameVersions, query, page * Constants.MODRINTH_PAGINATION_SIZE,
+            Constants.MODRINTH_PAGINATION_SIZE, sort, category);
+    }
+
+    public static ModrinthSearchResult searchShaders(List<String> gameVersions, String query, int offset, int limit,
+        String sort, String category) {
         List<List<String>> categories = category == null ? null
             : Collections.singletonList(Collections.singletonList(category));
 
-        return searchModrinth(gameVersions, query, page, sort, categories, ModrinthProjectType.SHADER);
+        return searchModrinth(gameVersions, query, offset, limit, sort, categories, ModrinthProjectType.SHADER);
     }
 
     public static ModrinthSearchResult searchDataPacks(List<String> gameVersions, String query, int page,
+        String sort, String category) {
+        return searchDataPacks(gameVersions, query, page * Constants.MODRINTH_PAGINATION_SIZE,
+            Constants.MODRINTH_PAGINATION_SIZE, sort, category);
+    }
+
+    public static ModrinthSearchResult searchDataPacks(List<String> gameVersions, String query, int offset, int limit,
         String sort, String category) {
         List<List<String>> categories = new ArrayList<>();
 
@@ -132,11 +163,11 @@ public class ModrinthApi {
             categories.add(Collections.singletonList(category));
         }
 
-        ModrinthSearchResult searchResult = searchModrinth(gameVersions, query, page, sort, categories,
+        ModrinthSearchResult searchResult = searchModrinth(gameVersions, query, offset, limit, sort, categories,
             ModrinthProjectType.DATAPACK);
 
-        if (searchResult == null || searchResult.hits.isEmpty()) {
-            return searchModrinth(gameVersions, query, page, sort, categories, ModrinthProjectType.MOD);
+        if (searchResult == null || searchResult.totalHits == 0) {
+            return searchModrinth(gameVersions, query, offset, limit, sort, categories, ModrinthProjectType.MOD);
         }
 
         return searchResult;
@@ -144,24 +175,40 @@ public class ModrinthApi {
 
     public static ModrinthSearchResult searchModsForForge(List<String> gameVersions, String query, int page,
         String sort, String category) {
+        return searchModsForForge(gameVersions, query, page * Constants.MODRINTH_PAGINATION_SIZE,
+            Constants.MODRINTH_PAGINATION_SIZE, sort, category);
+    }
+
+    public static ModrinthSearchResult searchModsForForge(List<String> gameVersions, String query, int offset,
+        int limit, String sort, String category) {
         List<List<String>> categories = category == null ? Collections.singletonList(Collections.singletonList("forge"))
             : Arrays.asList(Collections.singletonList(category), Collections.singletonList("forge"));
 
-        return searchModrinth(gameVersions, query, page, sort, categories,
-            ModrinthProjectType.MOD);
+        return searchModrinth(gameVersions, query, offset, limit, sort, categories, ModrinthProjectType.MOD);
     }
 
     public static ModrinthSearchResult searchModsForForgeOrFabric(List<String> gameVersions, String query, int page,
         String sort, String category) {
+        return searchModsForForgeOrFabric(gameVersions, query, page * Constants.MODRINTH_PAGINATION_SIZE,
+            Constants.MODRINTH_PAGINATION_SIZE, sort, category);
+    }
+
+    public static ModrinthSearchResult searchModsForForgeOrFabric(List<String> gameVersions, String query, int offset,
+        int limit, String sort, String category) {
         List<List<String>> categories = category == null ? Arrays.asList(Arrays.asList("forge", "fabric"))
             : Arrays.asList(Arrays.asList(category), Arrays.asList("forge", "fabric"));
 
-        return searchModrinth(gameVersions, query, page, sort, categories,
-            ModrinthProjectType.MOD);
+        return searchModrinth(gameVersions, query, offset, limit, sort, categories, ModrinthProjectType.MOD);
     }
 
     public static ModrinthSearchResult searchModsForNeoForge(List<String> gameVersions, String query, int page,
         String sort, String category) {
+        return searchModsForNeoForge(gameVersions, query, page * Constants.MODRINTH_PAGINATION_SIZE,
+            Constants.MODRINTH_PAGINATION_SIZE, sort, category);
+    }
+
+    public static ModrinthSearchResult searchModsForNeoForge(List<String> gameVersions, String query, int offset,
+        int limit, String sort, String category) {
         List<List<String>> categories = new ArrayList<>();
 
         if (category != null) {
@@ -176,11 +223,17 @@ public class ModrinthApi {
             categories.add(Collections.singletonList("neoforge"));
         }
 
-        return searchModrinth(gameVersions, query, page, sort, categories, ModrinthProjectType.MOD);
+        return searchModrinth(gameVersions, query, offset, limit, sort, categories, ModrinthProjectType.MOD);
     }
 
     public static ModrinthSearchResult searchModsForNeoForgeOrFabric(List<String> gameVersions, String query, int page,
         String sort, String category) {
+        return searchModsForNeoForgeOrFabric(gameVersions, query, page * Constants.MODRINTH_PAGINATION_SIZE,
+            Constants.MODRINTH_PAGINATION_SIZE, sort, category);
+    }
+
+    public static ModrinthSearchResult searchModsForNeoForgeOrFabric(List<String> gameVersions, String query,
+        int offset, int limit, String sort, String category) {
         List<List<String>> categories = new ArrayList<>();
 
         if (category != null) {
@@ -195,27 +248,37 @@ public class ModrinthApi {
             categories.add(Arrays.asList("neoforge", "fabric"));
         }
 
-        return searchModrinth(gameVersions, query, page, sort, categories, ModrinthProjectType.MOD);
+        return searchModrinth(gameVersions, query, offset, limit, sort, categories, ModrinthProjectType.MOD);
     }
 
     public static ModrinthSearchResult searchModsForFabric(List<String> gameVersions, String query, int page,
         String sort, String category) {
+        return searchModsForFabric(gameVersions, query, page * Constants.MODRINTH_PAGINATION_SIZE,
+            Constants.MODRINTH_PAGINATION_SIZE, sort, category);
+    }
+
+    public static ModrinthSearchResult searchModsForFabric(List<String> gameVersions, String query, int offset,
+        int limit, String sort, String category) {
         List<List<String>> categories = category == null
             ? Collections.singletonList(Collections.singletonList("fabric"))
             : Arrays.asList(Collections.singletonList(category), Collections.singletonList("fabric"));
 
-        return searchModrinth(gameVersions, query, page, sort, categories,
-            ModrinthProjectType.MOD);
+        return searchModrinth(gameVersions, query, offset, limit, sort, categories, ModrinthProjectType.MOD);
     }
 
     public static ModrinthSearchResult searchModsForLegacyFabric(List<String> gameVersions, String query, int page,
         String sort, String category) {
+        return searchModsForLegacyFabric(gameVersions, query, page * Constants.MODRINTH_PAGINATION_SIZE,
+            Constants.MODRINTH_PAGINATION_SIZE, sort, category);
+    }
+
+    public static ModrinthSearchResult searchModsForLegacyFabric(List<String> gameVersions, String query, int offset,
+        int limit, String sort, String category) {
         List<List<String>> categories = category == null
             ? Collections.singletonList(Collections.singletonList("legacy-fabric"))
             : Arrays.asList(Collections.singletonList(category), Collections.singletonList("legacy-fabric"));
 
-        return searchModrinth(gameVersions, query, page, sort, categories,
-            ModrinthProjectType.MOD);
+        return searchModrinth(gameVersions, query, offset, limit, sort, categories, ModrinthProjectType.MOD);
     }
 
     public static ModrinthSearchResult searchModsForQuilt(List<String> gameVersions, String query, int page,
@@ -228,10 +291,16 @@ public class ModrinthApi {
 
     public static ModrinthSearchResult searchModsForQuiltOrFabric(List<String> gameVersions, String query, int page,
         String sort, String category) {
+        return searchModsForQuiltOrFabric(gameVersions, query, page * Constants.MODRINTH_PAGINATION_SIZE,
+            Constants.MODRINTH_PAGINATION_SIZE, sort, category);
+    }
+
+    public static ModrinthSearchResult searchModsForQuiltOrFabric(List<String> gameVersions, String query, int offset,
+        int limit, String sort, String category) {
         List<List<String>> categories = category == null ? Collections.singletonList(Arrays.asList("quilt", "fabric"))
             : Arrays.asList(Collections.singletonList(category), Arrays.asList("quilt", "fabric"));
 
-        return searchModrinth(gameVersions, query, page, sort, categories, ModrinthProjectType.MOD);
+        return searchModrinth(gameVersions, query, offset, limit, sort, categories, ModrinthProjectType.MOD);
     }
 
     public static ModrinthSearchResult searchModPacks(String minecraftVersion, String query, int page, String sort,
@@ -246,21 +315,33 @@ public class ModrinthApi {
 
     public static ModrinthSearchResult searchPluginsForPaper(List<String> gameVersions, String query, int page,
         String sort, String category) {
+        return searchPluginsForPaper(gameVersions, query, page * Constants.MODRINTH_PAGINATION_SIZE,
+            Constants.MODRINTH_PAGINATION_SIZE, sort, category);
+    }
+
+    public static ModrinthSearchResult searchPluginsForPaper(List<String> gameVersions, String query, int offset,
+        int limit, String sort, String category) {
         List<List<String>> categories = category == null
             ? Collections.singletonList(Arrays.asList("paper", "bukkit", "spigot"))
             : Arrays.asList(Collections.singletonList(category), Arrays.asList("paper", "bukkit", "spigot"));
 
-        return searchModrinth(gameVersions, query, page, sort, categories, ModrinthProjectType.PLUGIN);
+        return searchModrinth(gameVersions, query, offset, limit, sort, categories, ModrinthProjectType.PLUGIN);
     }
 
     public static ModrinthSearchResult searchPluginsForPurpur(List<String> gameVersions, String query, int page,
         String sort, String category) {
+        return searchPluginsForPurpur(gameVersions, query, page * Constants.MODRINTH_PAGINATION_SIZE,
+            Constants.MODRINTH_PAGINATION_SIZE, sort, category);
+    }
+
+    public static ModrinthSearchResult searchPluginsForPurpur(List<String> gameVersions, String query, int offset,
+        int limit, String sort, String category) {
         List<List<String>> categories = category == null
             ? Collections.singletonList(Arrays.asList("purpur", "paper", "bukkit", "spigot"))
             : Arrays.asList(Collections.singletonList(category),
                 Arrays.asList("purpur", "paper", "bukkit", "spigot"));
 
-        return searchModrinth(gameVersions, query, page, sort, categories, ModrinthProjectType.PLUGIN);
+        return searchModrinth(gameVersions, query, offset, limit, sort, categories, ModrinthProjectType.PLUGIN);
     }
 
     public static @Nullable ModrinthProject getProject(String projectId) {

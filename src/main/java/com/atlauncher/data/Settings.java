@@ -31,6 +31,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -49,6 +50,11 @@ import com.atlauncher.utils.sort.InstanceSortingStrategies;
 import com.google.gson.annotations.SerializedName;
 
 public class Settings {
+    // results per page offered in the Add Mods dialog
+    public static final List<Integer> ADD_MODS_PAGE_SIZES = Collections
+        .unmodifiableList(Arrays.asList(25, 50, 100, 200));
+    public static final int DEFAULT_ADD_MODS_PAGE_SIZE = 25;
+
     // Launcher things
     public String lastAccount;
     public boolean usingCustomJavaPath = false;
@@ -98,6 +104,7 @@ public class Settings {
     public boolean allowCurseForgeAlphaBetaFiles = false;
     public boolean dontCheckModsOnCurseForge = false;
     public boolean dontCheckModsOnModrinth = false;
+    public int addModsPageSize = DEFAULT_ADD_MODS_PAGE_SIZE;
     public boolean scanModsOnLaunch = true;
 
     // Java/Minecraft
@@ -290,6 +297,8 @@ public class Settings {
     public void validate() {
         validateAddModRestriction();
 
+        validateAddModsPageSize();
+
         validateAnalyticsClientId();
 
         validateWindowSettings();
@@ -374,6 +383,12 @@ public class Settings {
         }
 
         disableAddModRestrictions = false;
+    }
+
+    void validateAddModsPageSize() {
+        if (!ADD_MODS_PAGE_SIZES.contains(addModsPageSize)) {
+            addModsPageSize = DEFAULT_ADD_MODS_PAGE_SIZE;
+        }
     }
 
     private void validateDefaultModPlatform() {
