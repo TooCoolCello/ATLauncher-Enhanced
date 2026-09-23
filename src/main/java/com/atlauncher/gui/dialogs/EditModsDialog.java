@@ -18,9 +18,13 @@
 package com.atlauncher.gui.dialogs;
 
 import java.awt.BorderLayout;
+import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
+import java.awt.event.ActionEvent;
+import java.awt.event.InputEvent;
 import java.awt.event.ItemEvent;
+import java.awt.event.KeyEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.io.File;
@@ -29,15 +33,18 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import javax.swing.AbstractAction;
 import javax.swing.AbstractButton;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
+import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JLayer;
@@ -45,8 +52,13 @@ import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
+import javax.swing.JTextField;
+import javax.swing.KeyStroke;
 import javax.swing.SwingConstants;
+import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 
 import org.mini2Dx.gettext.GetText;
 
@@ -56,6 +68,7 @@ import com.atlauncher.data.DisableableMod;
 import com.atlauncher.data.Instance;
 import com.atlauncher.data.ModManagement;
 import com.atlauncher.data.Server;
+import com.atlauncher.data.curseforge.CurseForgeAuthor;
 import com.atlauncher.data.curseforge.CurseForgeFingerprint;
 import com.atlauncher.data.curseforge.CurseForgeProject;
 import com.atlauncher.data.minecraft.FabricMod;
@@ -75,6 +88,7 @@ import com.atlauncher.utils.FileUtils;
 import com.atlauncher.utils.Hashing;
 import com.atlauncher.utils.ModrinthApi;
 import com.atlauncher.utils.Utils;
+import com.formdev.flatlaf.icons.FlatSearchIcon;
 
 public class EditModsDialog extends JDialog {
     private static final long serialVersionUID = 7004414192679481818L;
@@ -90,6 +104,7 @@ public class EditModsDialog extends JDialog {
     private JButton refreshMetadataButton;
     private JCheckBox selectAllEnabledModsCheckbox, selectAllDisabledModsCheckbox;
     private ArrayList<ModsJCheckBox> enabledMods, disabledMods;
+    private final JTextField searchField = new JTextField(20);
 
     public EditModsDialog(Instance instance) {
         super(App.launcher.getParent(),
@@ -123,6 +138,16 @@ public class EditModsDialog extends JDialog {
             }
         });
 
+        getRootPane().getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW)
+            .put(KeyStroke.getKeyStroke(KeyEvent.VK_F, InputEvent.CTRL_DOWN_MASK), "focusSearch");
+        getRootPane().getActionMap().put("focusSearch", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                searchField.requestFocusInWindow();
+                searchField.selectAll();
+            }
+        });
+
         setupComponents();
 
         instanceOrServer.scanMissingMods(this);
@@ -139,11 +164,30 @@ public class EditModsDialog extends JDialog {
         split.setEnabled(false);
         add(split, BorderLayout.NORTH);
 
-        JSplitPane labelsTop = new JSplitPane(JSplitPane.VERTICAL_SPLIT);
-        labelsTop.setDividerSize(0);
-        labelsTop.setBorder(null);
-        labelsTop.setEnabled(false);
-        split.setLeftComponent(labelsTop);
+        JPanel searchPanel = new JPanel(new FlowLayout());
+        searchField.putClientProperty("JTextField.placeholderText", GetText.tr("Search"));
+        searchField.putClientProperty("JTextField.leadingIcon", new FlatSearchIcon());
+        searchField.putClientProperty("JTextField.showClearButton", true);
+        searchField.putClientProperty("JTextField.clearCallback", (Runnable) () -> searchField.setText(""));
+        // document events (not key events) so paste, the clear button and setText all refilter
+        searchField.getDocument().addDocumentListener(new DocumentListener() {
+            @Override
+            public void insertUpdate(DocumentEvent e) {
+                applyFilter();
+            }
+
+            @Override
+            public void removeUpdate(DocumentEvent e) {
+                applyFilter();
+            }
+
+            @Override
+            public void changedUpdate(DocumentEvent e) {
+                applyFilter();
+            }
+        });
+        searchPanel.add(searchField);
+        split.setLeftComponent(searchPanel);
 
         JSplitPane labels = new JSplitPane();
         labels.setDividerLocation(275);
@@ -162,7 +206,7 @@ public class EditModsDialog extends JDialog {
         selectAllEnabledModsCheckbox.addActionListener(e -> {
             boolean selected = selectAllEnabledModsCheckbox.isSelected();
 
-            enabledMods.forEach(em -> em.setSelected(selected));
+            enabledMods.stream().filter(Component::isVisible).forEach(em -> em.setSelected(selected));
         });
         topLeftPanel.add(selectAllEnabledModsCheckbox);
 
@@ -178,7 +222,7 @@ public class EditModsDialog extends JDialog {
         selectAllDisabledModsCheckbox.addActionListener(e -> {
             boolean selected = selectAllDisabledModsCheckbox.isSelected();
 
-            disabledMods.forEach(dm -> dm.setSelected(selected));
+            disabledMods.stream().filter(Component::isVisible).forEach(dm -> dm.setSelected(selected));
         });
         topRightPanel.add(selectAllDisabledModsCheckbox);
 
@@ -297,7 +341,7 @@ public class EditModsDialog extends JDialog {
                         }
                     }
                     if (reload) {
-                        reloadPanels();
+                        SwingUtilities.invokeLater(this::reloadPanels);
                     }
                 }
                 progressDialog.close();
@@ -358,6 +402,11 @@ public class EditModsDialog extends JDialog {
     }
 
     private void loadMods() {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(this::loadMods);
+            return;
+        }
+
         List<DisableableMod> mods = instanceOrServer.getMods().stream().filter(DisableableMod::wasSelected)
             .filter(m -> !m.skipped && m.type != com.atlauncher.data.Type.worlds)
             .sorted(Comparator.comparing(m -> m.name, String.CASE_INSENSITIVE_ORDER)).collect(Collectors.toList());
@@ -398,15 +447,90 @@ public class EditModsDialog extends JDialog {
             });
             disabledModsPanel.add(checkBox);
         }
-        int enabledHeight = enabledMods.stream()
-                .mapToInt(cb -> cb.getPreferredSize().height)
-                .sum();
-        enabledModsPanel.setPreferredSize(new Dimension(0, enabledHeight));
 
-        int disabledHeight = disabledMods.stream()
-                .mapToInt(cb -> cb.getPreferredSize().height)
-                .sum();
-        disabledModsPanel.setPreferredSize(new Dimension(0, disabledHeight));
+        // keeps the current search across refreshes and sets the list heights
+        applyFilter();
+    }
+
+    /**
+     * Hides rows that don't match the search. Hidden rows are deselected so bulk actions (enable, disable, remove,
+     * update, reinstall, refresh metadata) can never act on mods the user can't see.
+     */
+    private void applyFilter() {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(this::applyFilter);
+            return;
+        }
+
+        if (enabledMods == null || disabledMods == null) {
+            return;
+        }
+
+        String query = searchField.getText();
+        filterRows(enabledMods, enabledModsPanel, query);
+        filterRows(disabledMods, disabledModsPanel, query);
+        checkBoxesChanged();
+    }
+
+    private static void filterRows(List<ModsJCheckBox> rows, JPanel panel, String query) {
+        int height = 0;
+        for (ModsJCheckBox row : rows) {
+            boolean visible = matchesSearch(row.getDisableableMod(), row.getText(), query);
+            if (!visible && row.isSelected()) {
+                row.setSelected(false);
+            }
+            row.setVisible(visible);
+            if (visible) {
+                height += row.getPreferredSize().height;
+            }
+        }
+
+        panel.setPreferredSize(new Dimension(0, height));
+        panel.revalidate();
+        panel.repaint();
+    }
+
+    /**
+     * Case-insensitive match against the name, row label (e.g. "[Plugin] " prefix), filename, CurseForge project
+     * id/slug/authors and Modrinth project id/slug. Any of these may be missing. Modrinth only stores a team id, so
+     * Modrinth authors aren't searchable.
+     */
+    static boolean matchesSearch(DisableableMod mod, String displayText, String query) {
+        String needle = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
+        if (needle.isEmpty()) {
+            return true;
+        }
+
+        List<String> fields = new ArrayList<>();
+        fields.add(mod.getName());
+        fields.add(displayText);
+        fields.add(mod.getFilename());
+
+        if (mod.curseForgeProjectId != null) {
+            fields.add(String.valueOf(mod.curseForgeProjectId));
+        }
+        if (mod.curseForgeProject != null) {
+            fields.add(String.valueOf(mod.curseForgeProject.id));
+            fields.add(mod.curseForgeProject.slug);
+            if (mod.curseForgeProject.authors != null) {
+                for (CurseForgeAuthor author : mod.curseForgeProject.authors) {
+                    if (author != null) {
+                        fields.add(author.name);
+                    }
+                }
+            }
+        }
+        if (mod.modrinthProject != null) {
+            fields.add(mod.modrinthProject.id);
+            fields.add(mod.modrinthProject.slug);
+        }
+
+        for (String field : fields) {
+            if (field != null && field.toLowerCase(Locale.ROOT).contains(needle)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void checkBoxesChanged() {
@@ -429,10 +553,15 @@ public class EditModsDialog extends JDialog {
         refreshMetadataButton
             .setEnabled(!enabledMods.isEmpty() && enabledMods.stream().anyMatch(AbstractButton::isSelected));
 
-        selectAllEnabledModsCheckbox
-            .setSelected(!enabledMods.isEmpty() && enabledMods.stream().allMatch(AbstractButton::isSelected));
-        selectAllDisabledModsCheckbox
-            .setSelected(!disabledMods.isEmpty() && disabledMods.stream().allMatch(AbstractButton::isSelected));
+        updateSelectAll(selectAllEnabledModsCheckbox, enabledMods);
+        updateSelectAll(selectAllDisabledModsCheckbox, disabledMods);
+    }
+
+    private static void updateSelectAll(JCheckBox selectAll, List<ModsJCheckBox> rows) {
+        List<ModsJCheckBox> visible = rows.stream().filter(Component::isVisible).collect(Collectors.toList());
+
+        selectAll.setEnabled(!visible.isEmpty());
+        selectAll.setSelected(!visible.isEmpty() && visible.stream().allMatch(AbstractButton::isSelected));
     }
 
     private void checkForUpdates() {
@@ -692,6 +821,11 @@ public class EditModsDialog extends JDialog {
     }
 
     public void reloadPanels() {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(this::reloadPanels);
+            return;
+        }
+
         instanceOrServer.save();
 
         enabledModsPanel.removeAll();
