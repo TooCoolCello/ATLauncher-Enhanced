@@ -17,21 +17,32 @@
  */
 package com.atlauncher.managers;
 
+import java.awt.Dialog;
+import java.awt.Frame;
 import java.awt.Window;
+import java.awt.event.WindowEvent;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Timer;
 import java.util.TimerTask;
+import java.util.function.Function;
+import java.util.function.Predicate;
 
 import javax.swing.Icon;
 import javax.swing.JDialog;
 import javax.swing.JOptionPane;
+import javax.swing.SwingUtilities;
 
 import org.mini2Dx.gettext.GetText;
 
 import com.atlauncher.App;
+import com.atlauncher.gui.dialogs.BrowserDownloadDialog;
+import com.atlauncher.gui.dialogs.ProgressDialog;
+import com.atlauncher.utils.DialogDebugMonitor;
 
 public final class DialogManager {
     public static final int OPTION_TYPE = 0;
@@ -196,6 +207,8 @@ public final class DialogManager {
             jop.setComponentOrientation(this.getParent().getComponentOrientation());
 
             JDialog dialog = jop.createDialog(this.getParent(), this.title);
+            // JOptionPane defaults to application-modal, which also blocks the tray menu (and its Recover UI action)
+            dialog.setModalityType(Dialog.ModalityType.DOCUMENT_MODAL);
             dialog.setAlwaysOnTop(true);
             dialog.setVisible(true);
 
@@ -245,6 +258,7 @@ public final class DialogManager {
             jop.setComponentOrientation(this.getParent().getComponentOrientation());
 
             JDialog dialog = jop.createDialog(this.getParent(), this.title);
+            dialog.setModalityType(Dialog.ModalityType.DOCUMENT_MODAL);
             List<File> filesForMonitoring = Arrays.asList(files);
 
             Timer timer = new Timer();
@@ -304,5 +318,167 @@ public final class DialogManager {
         }
 
         return null;
+    }
+
+    /**
+     * Recovers from a stuck or hidden modal dialog (e.g. one opened behind another window or off-screen) by
+     * cancelling launcher-owned modal dialogs deepest-first and bringing the launcher frame back. Safe to call
+     * from any thread; the window work always runs on the EDT.
+     *
+     * <p>
+     * If any active operation dialog (progress, browser downloads) is showing, no dialogs are closed at all:
+     * prompts from that operation aren't necessarily owned by its progress dialog, and cancelling a mod
+     * install/update part way can leave the old mod file already deleted with no replacement.
+     */
+    public static void recoverUi() {
+        if (SwingUtilities.isEventDispatchThread()) {
+            recoverUiOnEdt();
+        } else {
+            SwingUtilities.invokeLater(DialogManager::recoverUiOnEdt);
+        }
+    }
+
+    private static void recoverUiOnEdt() {
+        Window launcherFrame = App.launcher == null ? null : App.launcher.getParent();
+
+        // dialogs created without a parent are owned by Swing's shared owner frame
+        List<Window> roots = new ArrayList<>();
+        roots.add(JOptionPane.getRootFrame());
+        if (launcherFrame != null) {
+            roots.add(launcherFrame);
+        }
+
+        List<Dialog> owned = deepestFirst(showingModalDialogs(Window.getWindows(), roots), Window::getOwner, roots);
+        List<Dialog> targets = recoverable(owned, d -> isActiveOperationDialog(d.getClass()));
+
+        if (targets.isEmpty() && !owned.isEmpty()) {
+            LogManager.info("[RecoverUI] Active operation detected; skipped closing launcher modal dialogs");
+            for (Dialog dialog : owned) {
+                if (isActiveOperationDialog(dialog.getClass())) {
+                    LogManager.info("[RecoverUI] Active operation: " + DialogDebugMonitor.describe(dialog));
+                }
+            }
+        } else {
+            LogManager.info("[RecoverUI] Closing " + targets.size() + " recoverable modal dialog(s)");
+        }
+
+        for (Dialog dialog : targets) {
+            String name = DialogDebugMonitor.describe(dialog);
+            try {
+                if (!dialog.isShowing()) {
+                    // already closed by an earlier dialog's cancel path
+                    LogManager.info("[RecoverUI] " + name + " already closed");
+                    continue;
+                }
+
+                // let existing cancel paths run (e.g. JOptionPane returns CLOSED)
+                dialog.dispatchEvent(new WindowEvent(dialog, WindowEvent.WINDOW_CLOSING));
+
+                boolean needsDispose = dialog.isDisplayable() || dialog.isVisible();
+                if (needsDispose) {
+                    dialog.dispose();
+                }
+                LogManager.info("[RecoverUI] " + name + " closed" + (needsDispose ? " (disposed)" : ""));
+            } catch (Throwable t) {
+                LogManager.warn("[RecoverUI] Failed to close " + name + ": " + t);
+            }
+        }
+
+        try {
+            restoreLauncherFrame(launcherFrame);
+        } catch (Throwable t) {
+            LogManager.warn("[RecoverUI] Failed to restore launcher window: " + t);
+        }
+    }
+
+    /**
+     * Newest first (getWindows() is in creation order), so the stable depth sort closes a prompt before a
+     * same-depth dialog it was opened from.
+     */
+    private static List<Dialog> showingModalDialogs(Window[] windows, Collection<Window> roots) {
+        List<Dialog> modals = new ArrayList<>();
+        for (int i = windows.length - 1; i >= 0; i--) {
+            Window window = windows[i];
+            if (window instanceof Dialog && !roots.contains(window) && window.isShowing()
+                    && ((Dialog) window).isModal()) {
+                modals.add((Dialog) window);
+            }
+        }
+        return modals;
+    }
+
+    /**
+     * Dialogs for an operation in progress (install, download, copy, metadata refresh, update). Closing these
+     * cancels the operation, which isn't safe to do blindly.
+     */
+    static boolean isActiveOperationDialog(Class<?> dialogClass) {
+        return ProgressDialog.class.isAssignableFrom(dialogClass)
+                || BrowserDownloadDialog.class.isAssignableFrom(dialogClass);
+    }
+
+    /**
+     * The dialogs safe to close: all of them, or none if any is an active operation.
+     */
+    static <T> List<T> recoverable(List<T> items, Predicate<T> isActive) {
+        // Intentionally closes no launcher modal dialogs while an operation is running, to avoid cancelling an
+        // install/update/download and leaving pack files in a partial state.
+        for (T item : items) {
+            if (isActive.test(item)) {
+                return new ArrayList<>();
+            }
+        }
+        return items;
+    }
+
+    /**
+     * Keeps only items owned (directly or transitively) by one of the roots, ordered by ownership depth so every
+     * child comes before its owner. Generic over the owner lookup so it can be tested without a display.
+     */
+    static <W, T extends W> List<T> deepestFirst(List<T> items, Function<W, W> ownerOf, Collection<W> roots) {
+        List<T> owned = new ArrayList<>();
+        for (T item : items) {
+            if (ownerDepth(item, ownerOf, roots) > 0) {
+                owned.add(item);
+            }
+        }
+
+        owned.sort(Comparator.comparingInt((T item) -> ownerDepth(item, ownerOf, roots)).reversed());
+        return owned;
+    }
+
+    /**
+     * Number of owner hops from the item up to one of the roots, or 0 if it isn't owned by any of them.
+     */
+    private static <W> int ownerDepth(W item, Function<W, W> ownerOf, Collection<W> roots) {
+        int depth = 0;
+        for (W owner = ownerOf.apply(item); owner != null; owner = ownerOf.apply(owner)) {
+            depth++;
+            if (roots.contains(owner)) {
+                return depth;
+            }
+        }
+        return 0;
+    }
+
+    private static void restoreLauncherFrame(Window launcherFrame) {
+        if (!(launcherFrame instanceof Frame) || !launcherFrame.isVisible()) {
+            // hidden on purpose (e.g. while Minecraft runs), so leave it alone
+            LogManager.info("[RecoverUI] Launcher window not visible, not restoring it");
+            return;
+        }
+
+        Frame frame = (Frame) launcherFrame;
+        if ((frame.getExtendedState() & Frame.ICONIFIED) != 0) {
+            frame.setExtendedState(frame.getExtendedState() & ~Frame.ICONIFIED);
+            LogManager.info("[RecoverUI] Restored minimised launcher window");
+        }
+
+        if (!DialogDebugMonitor.intersectsAnyScreen(frame.getBounds(), DialogDebugMonitor.getScreenBounds())) {
+            frame.setLocationRelativeTo(null);
+            LogManager.info("[RecoverUI] Launcher window was off-screen, centred it");
+        }
+
+        frame.toFront();
+        frame.requestFocus();
     }
 }

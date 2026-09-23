@@ -153,7 +153,7 @@ public final class DialogDebugMonitor {
         }
     }
 
-    private static String describe(Window window) {
+    public static String describe(Window window) {
         String title = null;
         if (window instanceof Dialog) {
             title = ((Dialog) window).getTitle();
@@ -168,7 +168,7 @@ public final class DialogDebugMonitor {
      * Titles are shown to users and occasionally contain file names. Anything that looks like a path or URL is
      * redacted, and long titles are truncated.
      */
-    static String sanitizeTitle(String title) {
+    public static String sanitizeTitle(String title) {
         if (title == null || title.isEmpty()) {
             return "";
         }
@@ -180,7 +180,7 @@ public final class DialogDebugMonitor {
         return title.length() > MAX_TITLE_LENGTH ? title.substring(0, MAX_TITLE_LENGTH) + "..." : title;
     }
 
-    private static List<Rectangle> getScreenBounds() {
+    public static List<Rectangle> getScreenBounds() {
         List<Rectangle> screens = new ArrayList<>();
         for (GraphicsDevice device : GraphicsEnvironment.getLocalGraphicsEnvironment().getScreenDevices()) {
             screens.add(device.getDefaultConfiguration().getBounds());
@@ -188,7 +188,7 @@ public final class DialogDebugMonitor {
         return screens;
     }
 
-    static boolean intersectsAnyScreen(Rectangle bounds, List<Rectangle> screens) {
+    public static boolean intersectsAnyScreen(Rectangle bounds, List<Rectangle> screens) {
         for (Rectangle screen : screens) {
             if (screen.intersects(bounds)) {
                 return true;

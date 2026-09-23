@@ -17,9 +17,7 @@
  */
 package com.atlauncher.gui;
 
-import java.awt.Frame;
 import java.awt.SystemTray;
-import java.awt.Window;
 
 import javax.swing.JMenuItem;
 import javax.swing.JPopupMenu;
@@ -91,14 +89,7 @@ public final class TrayMenu extends JPopupMenu {
         });
         this.killOpenDialogsButton.addActionListener(e -> {
             Analytics.trackEvent(AnalyticsEvent.simpleEvent("tray_kill_open_dialogs"));
-            for (Frame frame : Frame.getFrames()) {
-                for (Window window : frame.getOwnedWindows()) {
-                    if (window.getName().startsWith("dialog")) {
-                        window.setVisible(false);
-                        window.dispose();
-                    }
-                }
-            }
+            DialogManager.recoverUi();
         });
         this.openLauncherFolderButton.addActionListener(e -> {
             Analytics.trackEvent(AnalyticsEvent.simpleEvent("tray_open_launcher_folder"));
