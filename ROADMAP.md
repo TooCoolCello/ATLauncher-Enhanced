@@ -1,0 +1,144 @@
+# ATLauncher-Enhanced Roadmap
+
+A working handoff for this fork of [ATLauncher](https://github.com/ATLauncher/ATLauncher).
+It separates what upstream already provides from what this fork adds, so future
+work extends existing code instead of rebuilding it.
+
+- Fork remote: `origin` → `TooCoolCello/ATLauncher-Enhanced`
+- Upstream remote: `upstream` → `ATLauncher/ATLauncher`
+- Base branch: `master` (tracks upstream releases; fork work is **not** merged into it)
+
+Paths below are relative to `src/main/java/com/atlauncher/` unless they start with `src/`.
+
+## Before implementing a feature
+
+1. **Inspect the checked-out base and fork first.** Read the relevant upstream code
+   and the fork branches before designing anything. A keyword search that finds
+   nothing does **not** prove a feature is absent. Trace the actual UI and data flow.
+2. **Extend existing code.** Add Mods, Edit Mods, the file/version selectors,
+   dependency handling, server creation and import/export already exist. Build on
+   them rather than writing parallel implementations.
+3. **Keep project-level loader metadata separate from actual file compatibility.**
+   A project listing "Fabric" or "NeoForge" says nothing about whether a specific
+   file works with a specific Minecraft version, loader or Connector setup. Filter
+   and label from file/version data wherever possible, and say clearly when the
+   launcher is guessing.
+4. Never stage `.idea/gradle.xml` or other IDE files with feature work.
+
+---
+
+## 1. Already in base ATLauncher
+
+Do not rebuild these. Extend them.
+
+| Feature | Main source paths |
+|---|---|
+| Add Mods (CurseForge/Modrinth search) | `gui/dialogs/AddModsDialog.java`, `utils/CurseForgeApi.java`, `utils/ModrinthApi.java` |
+| Edit Mods (enable/disable, update checks) | `gui/dialogs/EditModsDialog.java`, `data/DisableableMod.java`, `gui/components/ModsJCheckBox.java` |
+| CurseForge file selector | `gui/dialogs/CurseForgeProjectFileSelectorDialog.java` |
+| Modrinth version selector | `gui/dialogs/ModrinthVersionSelectorDialog.java` |
+| Dependency handling (install prompts in selectors) | the two selector dialogs above; `gui/dialogs/ModsChooser.java` |
+| Local server creation | `gui/dialogs/InstanceInstallerDialog.java` (`isServer`), `data/Server.java`, `gui/tabs/ServersTab.java` |
+| Instance import / export | `gui/dialogs/ImportInstanceDialog.java`, `gui/dialogs/InstanceExportDialog.java`, `gui/dialogs/ModrinthExportOverridesDialog.java` |
+| Maximum Java memory | `data/Settings.java` (`maximumMemory`), per-instance overrides in `data/Instance.java` |
+| Some Sinytra-aware Fabric browsing | `data/Settings.java` (`showFabricModsWhenSinytraInstalled`), `constants/Constants.java` (Connector IDs), `AddModsDialog.java`, `isForgeLikeAndHasInstalledSinytraConnector()` in `data/Instance.java` / `data/Server.java` / `data/ModManagement.java`, `gui/tabs/settings/ModsSettingsTab.java` |
+
+Note: hiding Fabric results when Connector is absent is **existing base behavior**.
+Seeing it does not verify any fork change.
+
+## 2. Completed and pushed in this fork
+
+Each item is on its own branch on `origin`. The branches are stacked in the order
+below, and none is merged into `master` yet.
+
+| Feature | Branch | Key paths |
+|---|---|---|
+| Dialog lifecycle monitoring | `feature/dialog-recovery` | `utils/DialogDebugMonitor.java`, `App.java` |
+| Safe dialog recovery | `feature/recover-ui` | `managers/DialogManager.java`, `gui/TrayMenu.java` |
+| Edit Mods live search | `feature/edit-mods-search` | `gui/dialogs/EditModsDialog.java` |
+| Add Mods page size 25/50/100/200 | *(commit `a38cedd3`; no dedicated branch, pushed as part of `feature/add-mods-list-view` and later)* | `gui/dialogs/AddModsPagination.java`, `data/Settings.java`, `CurseForgeApi.java`, `ModrinthApi.java` |
+| Add Mods Cards / List results | `feature/add-mods-list-view` | `data/AddModsViewMode.java`, `gui/card/CompactResultRow.java`, `gui/card/*Card.java` |
+| Invalid remote-image-cache handling | `fix/remote-image-cache-empty-url` | `workers/BackgroundImageWorker.java` |
+| Loader indicators (official NeoForge/Quilt art, with fallbacks) | `feature/add-mods-loader-icons` | `data/LoaderIndicators.java`, `gui/card/LoaderIndicatorStrip.java`, `src/main/resources/assets/image/loader/` (see `ATTRIBUTION.md`) |
+
+Tests for these are under `src/test/java/com/atlauncher/` (same package as each class).
+
+## 3. Implemented locally but not yet committed
+
+**Branch:** `fix/sinytra-add-mods-selection` (based on `feature/add-mods-loader-icons`).
+**State:** working-tree changes only. Nothing is staged or committed.
+
+Sinytra selector and dependency corrections:
+- enabled-Connector detection (a disabled Connector jar no longer counts);
+- version-scoped native preference (prefer a native Forge/NeoForge file for *that* version before a Fabric fallback);
+- Modrinth `NONE` loader safety;
+- dependency-ID fixes;
+- null-loader handling;
+- honest selector notes ("Uses Sinytra Connector; compatibility is not guaranteed.").
+
+Files:
+- New: `data/SinytraConnector.java`
+- Modified: `data/Instance.java`, `data/Server.java`, `gui/dialogs/CurseForgeProjectFileSelectorDialog.java`, `gui/dialogs/ModrinthVersionSelectorDialog.java`
+- New tests: `src/test/java/com/atlauncher/data/SinytraConnectorTest.java`, `src/test/java/com/atlauncher/gui/dialogs/ModrinthDependencyCheckTest.java`, `src/test/java/com/atlauncher/gui/dialogs/SelectorLoaderFilterTest.java`
+
+Verification:
+- Automated (last reported): **147 tests passing, `shadowJar` built.**
+- Manual: **INCOMPLETE.** Still to check with a real Forge/NeoForge instance:
+  Connector enabled vs disabled vs absent; a project with both native and Fabric
+  files for the same MC version; Modrinth dependencies resolving to the right
+  project; the selector note appearing only when a Fabric fallback is actually offered.
+- `.idea/gradle.xml` is an unrelated local modification. **Never stage it with this work.**
+
+## 4. Planned
+
+Grouped into phases by dependency. There are no release numbers or dates.
+
+### Phase A — Finish Sinytra correctness
+- Complete manual verification of section 3, then commit and push.
+- Sinytra-aware mod update checks: don't offer a Fabric update in place of a
+  native file, or the reverse, without saying so. Start from `EditModsDialog.java` / `DisableableMod.java`.
+- Later: an honest, contextual Sinytra icon, shown only where a Connector
+  fallback is actually in play (build on `LoaderIndicatorStrip`).
+
+### Phase B — Compatibility filtering
+- Evidence-based compatibility filtering: use file/version data, not
+  project-level loader tags alone.
+- Option to hide incompatible modpacks.
+
+### Phase C — Discovery and organisation
+- Persistent Favorites.
+- User-created collections.
+- Browse and save Modrinth collections across mods, resource packs and data packs.
+- Related-mod discovery.
+- Add compatible mods from other people's modpacks.
+
+### Phase D — Dependency UX
+- Less rigid dependency prompts: keep / remove / replace choices instead of all-or-nothing.
+
+### Phase E — Instance defaults
+- Global default FOV and mouse sensitivity for new instances.
+- Configurable minimum Java heap (`-Xms`), separate from the existing maximum memory setting.
+- Generate a modpack's `defaultconfig` from an existing world's configs.
+- Manual client/server-side metadata per mod.
+
+### Phase F — Servers and sync
+- Import from a server exporter.
+- SFTP server entries.
+- Direct "Upload to SFTP".
+- Link an instance to a remote server.
+- Previewable "Sync with Server" covering server-relevant mods, configs,
+  KubeJS scripts and mod-loader changes. Excludes client-only changes.
+  **Stops** on a Minecraft-version or loader mismatch.
+
+## 5. Needs source verification
+
+Check these against upstream code before designing anything. A search that
+finds nothing is not proof that a feature is missing.
+
+- **Update checks + Sinytra:** how `EditModsDialog` / `DisableableMod` choose update candidates on Forge-like instances with Connector.
+- **Client/server side data:** whether base already reads side info from Modrinth/CurseForge (for server installs or exports) that manual metadata should extend.
+- **Minimum memory:** whether any `-Xms` or initial-memory handling exists in `data/Settings.java`, `data/Instance.java` or launch code (`data/InstanceLauncher.java`, `mclauncher/`).
+- **Favorites / collections:** whether any existing pack or mod favoriting exists (for example in the packs browser) that should be reused.
+- **Incompatible pack hiding:** what filtering `gui/tabs/PacksBrowserTab.java` and the platform APIs already do.
+- **Game options (FOV/sensitivity):** whether any existing code writes `options.txt` defaults.
+- **Server export/import formats:** what `InstanceExportDialog` and `ImportInstanceDialog` support today, and whether a server-exporter format fits there.
