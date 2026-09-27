@@ -56,6 +56,7 @@ import com.atlauncher.data.AddModRestriction;
 import com.atlauncher.data.AddModsViewMode;
 import com.atlauncher.data.DisableableMod;
 import com.atlauncher.data.Instance;
+import com.atlauncher.data.LoaderIndicators;
 import com.atlauncher.data.ModManagement;
 import com.atlauncher.data.ModPlatform;
 import com.atlauncher.data.Settings;
@@ -1136,7 +1137,7 @@ public final class AddModsDialog extends JDialog {
                             installForgifiedFabricApiButton.setVisible(true);
                         }
                     }
-                }, listView), gbc);
+                }, listView, LoaderIndicators.forSection(LoaderIndicators.fromCurseForge(castMod), sectionValue)), gbc);
 
                 gbc.gridy++;
             });
@@ -1266,7 +1267,7 @@ public final class AddModsDialog extends JDialog {
                             installForgifiedFabricApiButton.setVisible(true);
                         }
                     }
-                }, listView), gbc);
+                }, listView, LoaderIndicators.forSection(LoaderIndicators.fromModrinth(castMod), sectionValue)), gbc);
 
                 gbc.gridy++;
             });

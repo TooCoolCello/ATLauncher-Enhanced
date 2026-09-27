@@ -21,7 +21,9 @@ import java.awt.BorderLayout;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.event.ActionListener;
+import java.util.Collections;
 import java.util.Optional;
+import java.util.Set;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
@@ -36,6 +38,7 @@ import com.atlauncher.App;
 import com.atlauncher.data.ModManagement;
 import com.atlauncher.data.curseforge.CurseForgeAttachment;
 import com.atlauncher.data.curseforge.CurseForgeProject;
+import com.atlauncher.data.minecraft.loaders.LoaderType;
 import com.atlauncher.gui.borders.IconTitledBorder;
 import com.atlauncher.utils.OS;
 import com.atlauncher.utils.Utils;
@@ -55,15 +58,16 @@ public final class CurseForgeProjectCard extends JPanel {
     public CurseForgeProjectCard(final CurseForgeProject mod, final ModManagement instanceOrServer,
             ActionListener installAl,
             ActionListener removeAl) {
-        this(mod, instanceOrServer, installAl, removeAl, false);
+        this(mod, instanceOrServer, installAl, removeAl, false, Collections.emptySet());
     }
 
     /**
      * @param listView lay out as a compact full-width list row instead of a card
+     * @param loaders provider-reported loaders to show as icons; empty for none
      */
     public CurseForgeProjectCard(final CurseForgeProject mod, final ModManagement instanceOrServer,
             ActionListener installAl,
-            ActionListener removeAl, boolean listView) {
+            ActionListener removeAl, boolean listView, Set<LoaderType> loaders) {
         this.listView = listView;
         this.mod = mod;
         this.instanceOrServer = instanceOrServer;
@@ -85,12 +89,14 @@ public final class CurseForgeProjectCard extends JPanel {
         });
         viewButton.addActionListener(e -> OS.openWebBrowser(mod.getWebsiteUrl()));
 
+        JPanel loaderStrip = LoaderIndicatorStrip.create(loaders, "CurseForge");
+
         if (listView) {
             String author = mod.authors == null || mod.authors.isEmpty() ? null : mod.authors.get(0).name;
-            CompactResultRow.layout(this, icon, mod.name, author, mod.summary, mod.downloadCount, installedLabel,
-                    addButton, reinstallButton, removeButton, viewButton);
+            CompactResultRow.layout(this, icon, mod.name, author, mod.summary, mod.downloadCount, loaderStrip,
+                    installedLabel, addButton, reinstallButton, removeButton, viewButton);
         } else {
-            layoutAsCard(icon, viewButton);
+            layoutAsCard(icon, viewButton, loaderStrip);
         }
 
         int iconSize = listView ? CompactResultRow.ICON_SIZE : 60;
@@ -102,7 +108,7 @@ public final class CurseForgeProjectCard extends JPanel {
         updateInstalledStatus();
     }
 
-    private void layoutAsCard(JLabel icon, JButton viewButton) {
+    private void layoutAsCard(JLabel icon, JButton viewButton, JPanel loaderStrip) {
         setLayout(new BorderLayout());
         setPreferredSize(new Dimension(250, 180));
 
@@ -118,6 +124,11 @@ public final class CurseForgeProjectCard extends JPanel {
 
         summaryPanel.add(icon, BorderLayout.WEST);
         summaryPanel.add(summary, BorderLayout.CENTER);
+        if (loaderStrip != null) {
+            // lines up with the project icon's 5px inset
+            loaderStrip.setBorder(BorderFactory.createEmptyBorder(0, 3, 0, 0));
+            summaryPanel.add(loaderStrip, BorderLayout.SOUTH);
+        }
         summaryPanel.setBorder(new EmptyBorder(0, 0, 10, 0));
 
         JPanel buttonsPanel = new JPanel(new FlowLayout());

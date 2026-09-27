@@ -21,6 +21,8 @@ import java.awt.BorderLayout;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.event.ActionListener;
+import java.util.Collections;
+import java.util.Set;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
@@ -33,6 +35,7 @@ import org.mini2Dx.gettext.GetText;
 
 import com.atlauncher.App;
 import com.atlauncher.data.ModManagement;
+import com.atlauncher.data.minecraft.loaders.LoaderType;
 import com.atlauncher.data.modrinth.ModrinthSearchHit;
 import com.atlauncher.gui.borders.IconTitledBorder;
 import com.atlauncher.utils.OS;
@@ -53,15 +56,16 @@ public final class ModrinthSearchHitCard extends JPanel {
     public ModrinthSearchHitCard(final ModrinthSearchHit mod, final ModManagement instanceOrServer,
             ActionListener installAl,
             ActionListener removeAl) {
-        this(mod, instanceOrServer, installAl, removeAl, false);
+        this(mod, instanceOrServer, installAl, removeAl, false, Collections.emptySet());
     }
 
     /**
      * @param listView lay out as a compact full-width list row instead of a card
+     * @param loaders provider-reported loaders to show as icons; empty for none
      */
     public ModrinthSearchHitCard(final ModrinthSearchHit mod, final ModManagement instanceOrServer,
             ActionListener installAl,
-            ActionListener removeAl, boolean listView) {
+            ActionListener removeAl, boolean listView, Set<LoaderType> loaders) {
         this.listView = listView;
         this.mod = mod;
         this.instanceOrServer = instanceOrServer;
@@ -83,11 +87,13 @@ public final class ModrinthSearchHitCard extends JPanel {
         });
         viewButton.addActionListener(e -> OS.openWebBrowser(String.format("https://modrinth.com/mod/%s", mod.slug)));
 
+        JPanel loaderStrip = LoaderIndicatorStrip.create(loaders, "Modrinth");
+
         if (listView) {
             CompactResultRow.layout(this, icon, mod.title, mod.author, mod.description, mod.downloads,
-                    installedLabel, addButton, reinstallButton, removeButton, viewButton);
+                    loaderStrip, installedLabel, addButton, reinstallButton, removeButton, viewButton);
         } else {
-            layoutAsCard(icon, viewButton);
+            layoutAsCard(icon, viewButton, loaderStrip);
         }
 
         if (mod.iconUrl != null && !mod.iconUrl.isEmpty()) {
@@ -98,7 +104,7 @@ public final class ModrinthSearchHitCard extends JPanel {
         updateInstalledStatus();
     }
 
-    private void layoutAsCard(JLabel icon, JButton viewButton) {
+    private void layoutAsCard(JLabel icon, JButton viewButton, JPanel loaderStrip) {
         setLayout(new BorderLayout());
         setPreferredSize(new Dimension(250, 180));
 
@@ -114,6 +120,11 @@ public final class ModrinthSearchHitCard extends JPanel {
 
         summaryPanel.add(icon, BorderLayout.WEST);
         summaryPanel.add(summary, BorderLayout.CENTER);
+        if (loaderStrip != null) {
+            // lines up with the project icon's 5px inset
+            loaderStrip.setBorder(BorderFactory.createEmptyBorder(0, 3, 0, 0));
+            summaryPanel.add(loaderStrip, BorderLayout.SOUTH);
+        }
         summaryPanel.setBorder(new EmptyBorder(0, 0, 10, 0));
 
         JPanel buttonsPanel = new JPanel(new FlowLayout());

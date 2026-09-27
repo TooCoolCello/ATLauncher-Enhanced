@@ -47,8 +47,11 @@ final class CompactResultRow {
     private CompactResultRow() {
     }
 
+    /**
+     * @param loaderStrip reported-loader icons shown before the download count, or null for none
+     */
     static void layout(JPanel row, JLabel icon, String name, String author, String summary, int downloads,
-            JLabel installedLabel, JButton... actions) {
+            JPanel loaderStrip, JLabel installedLabel, JButton... actions) {
         row.setLayout(new BorderLayout(8, 0));
 
         Color separator = UIManager.getColor("Separator.foreground");
@@ -92,6 +95,9 @@ final class CompactResultRow {
 
         JPanel actionsPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
         actionsPanel.setOpaque(false);
+        if (loaderStrip != null) {
+            actionsPanel.add(loaderStrip);
+        }
         actionsPanel.add(new JLabel(GetText.tr("{0} downloads", NumberFormat.getIntegerInstance().format(downloads))));
         installedLabel.setToolTipText(GetText.tr("Installed"));
         actionsPanel.add(installedLabel);
