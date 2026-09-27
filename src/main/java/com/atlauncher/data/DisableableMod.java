@@ -25,9 +25,9 @@ import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -39,6 +39,7 @@ import com.atlauncher.data.curseforge.CurseForgeFile;
 import com.atlauncher.data.curseforge.CurseForgeProject;
 import com.atlauncher.data.minecraft.FabricMod;
 import com.atlauncher.data.minecraft.MCMod;
+import com.atlauncher.data.minecraft.loaders.LoaderVersion;
 import com.atlauncher.data.modrinth.ModrinthDownloadMetadata;
 import com.atlauncher.data.modrinth.ModrinthProject;
 import com.atlauncher.data.modrinth.ModrinthVersion;
@@ -398,70 +399,27 @@ public class DisableableMod implements Serializable {
                     return;
                 }
 
-                Stream<CurseForgeFile> curseForgeFilesStream = curseForgeFiles.stream()
-                        .sorted(Comparator.comparingInt((CurseForgeFile f) -> f.id).reversed());
-
-                if (App.settings.addModRestriction == AddModRestriction.STRICT) {
-                    curseForgeFilesStream = curseForgeFilesStream
-                            .filter(f -> f.gameVersions.contains(instanceOrServer.getMinecraftVersion()));
-                }
-
-                if (App.settings.addModRestriction == AddModRestriction.LAX) {
-                    try {
-                        List<String> minecraftVersionsToSearch = MinecraftManager
-                                .getMajorMinecraftVersions(instanceOrServer.getMinecraftVersion())
-                                .stream().map(mv -> mv.id).collect(Collectors.toList());
-
-                        curseForgeFilesStream = curseForgeFilesStream.filter(
-                                f -> f.gameVersions.stream()
-                                        .anyMatch(minecraftVersionsToSearch::contains));
-                    } catch (InvalidMinecraftVersion e) {
-                        LogManager.logStackTrace(e);
-                    }
-                }
+                CurseForgeProjectFileSelectorDialog.markMissingTagsAsUntagged(curseForgeFiles);
 
                 List<String> neoForgeForgeCompatabilityVersions = ConfigManager
                         .getConfigItem("loaders.neoforge.forgeCompatibleMinecraftVersions", new ArrayList<>());
 
-                // filter out files not for our loader
-                curseForgeFilesStream = curseForgeFilesStream.filter(cf -> {
-                    if (cf.gameVersions.contains("Fabric") && instanceOrServer.getLoaderVersion() != null
-                            && (instanceOrServer.getLoaderVersion().isFabric()
-                                    || instanceOrServer.getLoaderVersion().isLegacyFabric()
-                                    || instanceOrServer.getLoaderVersion().isQuilt())) {
-                        return true;
-                    }
+                if (curseForgeInstalledPath(instanceOrServer, curseForgeFiles,
+                        neoForgeForgeCompatabilityVersions) == SinytraConnector.InstalledPath.UNKNOWN) {
+                    LogManager.warn("Not checking " + name + " for updates: its installed file's loader is unknown");
+                }
 
-                    if (cf.gameVersions.contains("NeoForge") && instanceOrServer.getLoaderVersion() != null
-                            && instanceOrServer.getLoaderVersion().isNeoForge()) {
-                        return true;
-                    }
+                Predicate<CurseForgeFile> updateCandidate = curseForgeUpdateCandidate(instanceOrServer,
+                        curseForgeFiles, neoForgeForgeCompatabilityVersions);
 
-                    if (cf.gameVersions.contains("Forge") && instanceOrServer.getLoaderVersion() != null
-                            && (instanceOrServer.getLoaderVersion().isForge()
-                                    || (instanceOrServer.getLoaderVersion().isNeoForge()
-                                            && neoForgeForgeCompatabilityVersions
-                                                    .contains(instanceOrServer.getMinecraftVersion())))) {
-                        return true;
-                    }
-
-                    if (cf.gameVersions.contains("Quilt") && instanceOrServer.getLoaderVersion() != null
-                            && instanceOrServer.getLoaderVersion().isQuilt()) {
-                        return true;
-                    }
-
-                    // if there's no loaders, assume the mod is untagged so we should show it
-                    return !cf.gameVersions.contains("Fabric") && !cf.gameVersions.contains("NeoForge")
-                            && !cf.gameVersions.contains("Forge") && !cf.gameVersions.contains("Quilt");
-                });
-
-                if (curseForgeFilesStream.noneMatch(f -> f.id > curseForgeFileId)) {
+                if (!hasCurseForgeUpdate(instanceOrServer, curseForgeFiles, updateCandidate)) {
                     dialog.setReturnValue(false);
                     dialog.close();
                     return;
                 }
 
-                dialog.setReturnValue(CurseForgeApi.getProjectById(curseForgeProjectId));
+                CurseForgeProject project = CurseForgeApi.getProjectById(curseForgeProjectId);
+                dialog.setReturnValue(project == null ? null : new Pair<>(project, updateCandidate));
                 dialog.close();
             }));
             dialog.start();
@@ -474,10 +432,14 @@ public class DisableableMod implements Serializable {
                 return ((Boolean) dialog.getReturnValue()) == true;
             }
 
+            // the selector offers the same files the check counted, so it can't switch the loader path either
+            @SuppressWarnings("unchecked")
+            Pair<CurseForgeProject, Predicate<CurseForgeFile>> update =
+                    (Pair<CurseForgeProject, Predicate<CurseForgeFile>>) dialog.getReturnValue();
             CurseForgeProjectFileSelectorDialog curseForgeProjectFileSelectorDialog = new CurseForgeProjectFileSelectorDialog(
-                    parent, (CurseForgeProject) dialog.getReturnValue(),
+                    parent, update.left(),
                     instanceOrServer,
-                    curseForgeFileId);
+                    curseForgeFileId, update.right());
             curseForgeProjectFileSelectorDialog.setVisible(true);
         } else if (platform == ModPlatform.MODRINTH || ((platform == null && isFromModrinth())
                 && (!isFromCurseForge() || App.settings.defaultModPlatform == ModPlatform.MODRINTH))) {
@@ -488,10 +450,28 @@ public class DisableableMod implements Serializable {
                     GetText.tr("Checking For Update On {0}", "Modrinth"), "Cancelled checking for update on Modrinth",
                     parent);
             dialog.addThread(new Thread(() -> {
+                List<String> neoForgeForgeCompatabilityVersions = ConfigManager
+                        .getConfigItem("loaders.neoforge.forgeCompatibleMinecraftVersions", new ArrayList<>());
+
+                // an installed version stored without loaders is looked up by its ID among the project's versions
+                List<ModrinthVersion> projectVersions = hasTags(modrinthVersion.loaders) ? null
+                        : ModrinthApi.getVersions(modrinthProject.id);
+                SinytraConnector.InstalledPath installedPath = modrinthInstalledPath(instanceOrServer, projectVersions,
+                        neoForgeForgeCompatabilityVersions);
+
+                if (installedPath == SinytraConnector.InstalledPath.UNKNOWN) {
+                    LogManager.warn("Not checking " + name + " for updates: its installed version's loader is unknown");
+                    dialog.setReturnValue(null);
+                    dialog.close();
+                    return;
+                }
+
                 ModrinthProject mod = ModrinthApi.getProject(modrinthProject.id);
+                // the loader's own query leaves out the Fabric files a Connector install updates to
                 List<ModrinthVersion> versions = ModrinthApi.getVersions(modrinthProject.id,
                         instanceOrServer.getMinecraftVersion(),
-                        instanceOrServer.getLoaderVersion());
+                        installedPath == SinytraConnector.InstalledPath.CONNECTOR ? null
+                                : instanceOrServer.getLoaderVersion());
 
                 if (versions == null) {
                     dialog.setReturnValue(null);
@@ -499,22 +479,11 @@ public class DisableableMod implements Serializable {
                     return;
                 }
 
-                Stream<ModrinthVersion> versionsStream = versions.stream()
-                        .sorted(Comparator.comparing((ModrinthVersion mv) -> mv.datePublished).reversed());
+                // the selector gets only these, so it can't switch the loader path either
+                versions = modrinthUpdateCandidates(instanceOrServer, versions, installedPath,
+                        neoForgeForgeCompatabilityVersions);
 
-                if (this.type == Type.datapack) {
-                    versionsStream = versionsStream
-                            .filter(v -> v.loaders != null && v.loaders.contains("datapack"));
-                }
-
-                if (App.settings.addModRestriction == AddModRestriction.STRICT) {
-                    versionsStream = versionsStream
-                            .filter(v -> v.gameVersions.contains(instanceOrServer.getMinecraftVersion()));
-                }
-
-                if (versionsStream.noneMatch(v -> ISODateTimeFormat.dateTimeParser().parseDateTime(v.datePublished)
-                        .minusSeconds(1)
-                        .isAfter(ISODateTimeFormat.dateTimeParser().parseDateTime(modrinthVersion.datePublished)))) {
+                if (!hasModrinthUpdate(instanceOrServer, versions)) {
                     dialog.setReturnValue(null);
                     dialog.close();
                     return;
@@ -537,6 +506,170 @@ public class DisableableMod implements Serializable {
         }
 
         return true;
+    }
+
+    /**
+     * Which CurseForge files may update this one: files for the loader that keep the installed file's loader path (see
+     * {@link SinytraConnector#keepsLoaderPath}). A Fabric file installed through Connector updates only to Fabric
+     * files for this exact Minecraft version, whatever the Add Mod Restriction, and to none while Connector is
+     * inactive. On Forge or NeoForge, a file whose loader can't be established gets no updates.
+     */
+    Predicate<CurseForgeFile> curseForgeUpdateCandidate(ModManagement instanceOrServer,
+            List<CurseForgeFile> projectFiles, List<String> neoForgeForgeCompatibleVersions) {
+        LoaderVersion loader = instanceOrServer.getLoaderVersion();
+        String minecraftVersion = instanceOrServer.getMinecraftVersion();
+        boolean forgeCompatible = neoForgeForgeCompatibleVersions.contains(minecraftVersion);
+        SinytraConnector.InstalledPath installedPath = curseForgeInstalledPath(instanceOrServer, projectFiles,
+                neoForgeForgeCompatibleVersions);
+        boolean connectorActive = instanceOrServer.isForgeLikeAndHasInstalledSinytraConnector();
+
+        return cf -> SinytraConnector.keepsLoaderPath(installedPath, connectorActive, cf.gameVersions, loader,
+                forgeCompatible) && (installedPath == SinytraConnector.InstalledPath.CONNECTOR
+                        ? cf.gameVersions.contains(minecraftVersion)
+                        : isForLoader(cf.gameVersions, loader, forgeCompatible));
+    }
+
+    SinytraConnector.InstalledPath curseForgeInstalledPath(ModManagement instanceOrServer,
+            List<CurseForgeFile> projectFiles, List<String> neoForgeForgeCompatibleVersions) {
+        return SinytraConnector.installedPath(installedCurseForgeTags(projectFiles),
+                instanceOrServer.getLoaderVersion(),
+                neoForgeForgeCompatibleVersions.contains(instanceOrServer.getMinecraftVersion()));
+    }
+
+    /**
+     * The installed file's tags: the file with the installed file's exact ID in the project's file list, else its
+     * stored metadata. Null when neither has any.
+     */
+    private List<String> installedCurseForgeTags(List<CurseForgeFile> projectFiles) {
+        if (curseForgeFileId != null) {
+            Optional<List<String>> fetched = projectFiles.stream()
+                    .filter(f -> f != null && f.id == curseForgeFileId && hasTags(f.gameVersions))
+                    .map(f -> f.gameVersions).findFirst();
+
+            if (fetched.isPresent()) {
+                return fetched.get();
+            }
+        }
+
+        return curseForgeFile != null && hasTags(curseForgeFile.gameVersions) ? curseForgeFile.gameVersions : null;
+    }
+
+    private static boolean hasTags(List<String> tags) {
+        return tags != null && !tags.isEmpty();
+    }
+
+    // CurseForge files the loader runs natively, or untagged ones
+    private static boolean isForLoader(List<String> gameVersions, LoaderVersion loader, boolean forgeCompatible) {
+        if (gameVersions.contains("Fabric") && loader != null
+                && (loader.isFabric() || loader.isLegacyFabric() || loader.isQuilt())) {
+            return true;
+        }
+
+        if (gameVersions.contains("NeoForge") && loader != null && loader.isNeoForge()) {
+            return true;
+        }
+
+        if (gameVersions.contains("Forge") && loader != null
+                && (loader.isForge() || (loader.isNeoForge() && forgeCompatible))) {
+            return true;
+        }
+
+        if (gameVersions.contains("Quilt") && loader != null && loader.isQuilt()) {
+            return true;
+        }
+
+        // if there's no loaders, assume the mod is untagged so we should show it
+        return !gameVersions.contains("Fabric") && !gameVersions.contains("NeoForge")
+                && !gameVersions.contains("Forge") && !gameVersions.contains("Quilt");
+    }
+
+    /**
+     * Whether a newer CurseForge file than the installed one passes the Minecraft version restriction and the update
+     * filter. Expects files whose missing tags were already marked untagged.
+     */
+    boolean hasCurseForgeUpdate(ModManagement instanceOrServer, List<CurseForgeFile> projectFiles,
+            Predicate<CurseForgeFile> updateCandidate) {
+        Stream<CurseForgeFile> curseForgeFilesStream = projectFiles.stream();
+
+        if (App.settings.addModRestriction == AddModRestriction.STRICT) {
+            curseForgeFilesStream = curseForgeFilesStream
+                    .filter(f -> f.gameVersions.contains(instanceOrServer.getMinecraftVersion()));
+        }
+
+        if (App.settings.addModRestriction == AddModRestriction.LAX) {
+            try {
+                List<String> minecraftVersionsToSearch = MinecraftManager
+                        .getMajorMinecraftVersions(instanceOrServer.getMinecraftVersion())
+                        .stream().map(mv -> mv.id).collect(Collectors.toList());
+
+                curseForgeFilesStream = curseForgeFilesStream.filter(
+                        f -> f.gameVersions.stream()
+                                .anyMatch(minecraftVersionsToSearch::contains));
+            } catch (InvalidMinecraftVersion e) {
+                LogManager.logStackTrace(e);
+            }
+        }
+
+        return curseForgeFilesStream.filter(updateCandidate).anyMatch(f -> f.id > curseForgeFileId);
+    }
+
+    /**
+     * Which loader path the installed Modrinth version runs on: from its stored loaders, else from the version with its
+     * exact ID in {@code projectVersions}.
+     *
+     * @param projectVersions the project's versions, or null when the stored loaders are all there is
+     */
+    SinytraConnector.InstalledPath modrinthInstalledPath(ModManagement instanceOrServer,
+            List<ModrinthVersion> projectVersions, List<String> neoForgeForgeCompatibleVersions) {
+        List<String> loaders = modrinthVersion.loaders;
+
+        if (!hasTags(loaders) && projectVersions != null) {
+            loaders = projectVersions.stream()
+                    .filter(v -> v != null && modrinthVersion.id != null && modrinthVersion.id.equals(v.id))
+                    .map(v -> v.loaders).filter(DisableableMod::hasTags).findFirst().orElse(null);
+        }
+
+        return SinytraConnector.installedPath(loaders, instanceOrServer.getLoaderVersion(),
+                neoForgeForgeCompatibleVersions.contains(instanceOrServer.getMinecraftVersion()));
+    }
+
+    /**
+     * The fetched Modrinth versions that keep the installed version's loader path (see
+     * {@link SinytraConnector#keepsLoaderPath}). Connector updates must also be for this exact Minecraft version,
+     * whatever the Add Mod Restriction.
+     */
+    List<ModrinthVersion> modrinthUpdateCandidates(ModManagement instanceOrServer, List<ModrinthVersion> versions,
+            SinytraConnector.InstalledPath installedPath, List<String> neoForgeForgeCompatibleVersions) {
+        LoaderVersion loader = instanceOrServer.getLoaderVersion();
+        String minecraftVersion = instanceOrServer.getMinecraftVersion();
+        boolean forgeCompatible = neoForgeForgeCompatibleVersions.contains(minecraftVersion);
+        boolean connectorActive = instanceOrServer.isForgeLikeAndHasInstalledSinytraConnector();
+
+        return versions.stream()
+                .filter(v -> v != null && SinytraConnector.keepsLoaderPath(installedPath, connectorActive, v.loaders,
+                        loader, forgeCompatible))
+                .filter(v -> installedPath != SinytraConnector.InstalledPath.CONNECTOR
+                        || (v.gameVersions != null && v.gameVersions.contains(minecraftVersion)))
+                .collect(Collectors.toList());
+    }
+
+    // whether any version, after the datapack and Minecraft version restrictions, is newer than the installed one
+    boolean hasModrinthUpdate(ModManagement instanceOrServer, List<ModrinthVersion> versions) {
+        Stream<ModrinthVersion> versionsStream = versions.stream();
+
+        if (this.type == Type.datapack) {
+            versionsStream = versionsStream
+                    .filter(v -> v.loaders != null && v.loaders.contains("datapack"));
+        }
+
+        if (App.settings.addModRestriction == AddModRestriction.STRICT) {
+            versionsStream = versionsStream
+                    .filter(v -> v.gameVersions.contains(instanceOrServer.getMinecraftVersion()));
+        }
+
+        return versionsStream.anyMatch(v -> ISODateTimeFormat.dateTimeParser().parseDateTime(v.datePublished)
+                .minusSeconds(1)
+                .isAfter(ISODateTimeFormat.dateTimeParser().parseDateTime(modrinthVersion.datePublished)));
     }
 
     public boolean reinstall(Window parent, ModManagement instanceOrServer) {

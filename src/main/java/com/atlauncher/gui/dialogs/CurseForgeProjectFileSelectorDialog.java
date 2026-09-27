@@ -26,6 +26,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -66,6 +67,7 @@ public class CurseForgeProjectFileSelectorDialog extends JDialog {
     private final ModManagement instanceOrServer;
     private Integer installedFileId = null;
     private boolean selectNewest = true;
+    private Predicate<CurseForgeFile> updateCandidate = null;
 
     private final JPanel dependenciesPanel = new JPanel(new FlowLayout());
     private JScrollPane scrollPane;
@@ -94,13 +96,18 @@ public class CurseForgeProjectFileSelectorDialog extends JDialog {
         setupComponents();
     }
 
+    /**
+     * For updating an installed file: only files passing {@code updateCandidate} are offered, the same filter the
+     * update check used, so a pick can't switch the installed file's loader path.
+     */
     public CurseForgeProjectFileSelectorDialog(Window parent, CurseForgeProject mod, ModManagement instanceOrServer,
-        int installedFileId) {
+        int installedFileId, Predicate<CurseForgeFile> updateCandidate) {
         super(parent, ModalityType.DOCUMENT_MODAL);
 
         this.mod = mod;
         this.instanceOrServer = instanceOrServer;
         this.installedFileId = installedFileId;
+        this.updateCandidate = updateCandidate;
 
         setupComponents();
     }
@@ -227,7 +234,7 @@ public class CurseForgeProjectFileSelectorDialog extends JDialog {
      * tags) instead of failing the background load and leaving the dialog stuck on "Loading". It can never be a
      * Connector fallback, since that needs a Fabric tag.
      */
-    static void markMissingTagsAsUntagged(List<CurseForgeFile> files) {
+    public static void markMissingTagsAsUntagged(List<CurseForgeFile> files) {
         files.stream().filter(f -> f != null && f.gameVersions == null).forEach(f -> f.gameVersions = new ArrayList<>());
     }
 
@@ -372,15 +379,21 @@ public class CurseForgeProjectFileSelectorDialog extends JDialog {
 
             // only native files that fit this Minecraft version rule out a Connector fallback
             List<CurseForgeFile> versionMatchedFiles = curseForgeFilesStream.collect(Collectors.toList());
+            // an update's filter already decided which Connector files may be offered
             fabricFallbackAllowed = mod.getRootCategoryId() == Constants.CURSEFORGE_MODS_SECTION_ID
-                && SinytraConnector.allowsFabricFallback(
+                && (updateCandidate != null ? instanceOrServer.isForgeLikeAndHasInstalledSinytraConnector()
+                : SinytraConnector.allowsFabricFallback(
                 instanceOrServer.isForgeLikeAndHasInstalledSinytraConnector(), loaderVersion, forgeCompatible,
-                versionMatchedFiles.stream().map(f -> f.gameVersions).collect(Collectors.toList()));
+                versionMatchedFiles.stream().map(f -> f.gameVersions).collect(Collectors.toList())));
             curseForgeFilesStream = versionMatchedFiles.stream();
 
             // filter out files not for our loader (if browsing mods)
             if (mod.getRootCategoryId() == Constants.CURSEFORGE_MODS_SECTION_ID) {
                 curseForgeFilesStream = curseForgeFilesStream.filter(cf -> {
+                    if (updateCandidate != null) {
+                        return updateCandidate.test(cf);
+                    }
+
                     if (cf.gameVersions.contains("Fabric") && loaderVersion != null
                         && (loaderVersion.isFabric() || loaderVersion.isLegacyFabric()
                         || loaderVersion.isQuilt()

@@ -91,6 +91,56 @@ public final class SinytraConnector {
                 && !isNativeFile(loaderTags, loader, forgeCompatible);
     }
 
+    /**
+     * Which loader path an installed file runs on.
+     */
+    public enum InstalledPath {
+        NATIVE, CONNECTOR,
+        /** On Forge or NeoForge with no loader metadata: it could be a Fabric file running through Connector. */
+        UNKNOWN
+    }
+
+    /**
+     * Which loader path an installed file runs on, from its loader tags. Only Forge and NeoForge can run a file through
+     * Connector, so elsewhere every file is native. A file whose tags carry no loader follows the usual "untagged" rule
+     * and counts as native.
+     *
+     * @param installedTags the installed file's tags; null or empty when unknown
+     */
+    public static InstalledPath installedPath(Collection<String> installedTags, LoaderVersion loader,
+            boolean forgeCompatible) {
+        if (loader == null || !(loader.isForge() || loader.isNeoForge())) {
+            return InstalledPath.NATIVE;
+        }
+
+        if (installedTags == null || installedTags.isEmpty()) {
+            return InstalledPath.UNKNOWN;
+        }
+
+        return isFabricFallbackFile(installedTags, loader, forgeCompatible) ? InstalledPath.CONNECTOR
+                : InstalledPath.NATIVE;
+    }
+
+    /**
+     * Whether a file can update an installed one without changing its loader path. A file installed through Connector
+     * only updates to another Connector file, and only while Connector is active. A native file never updates to a
+     * Connector one. A file on an unknown path gets no updates. Switching paths would need a separate migration
+     * action, not an update.
+     */
+    public static boolean keepsLoaderPath(InstalledPath installed, boolean connectorActive,
+            Collection<String> candidateTags, LoaderVersion loader, boolean forgeCompatible) {
+        boolean candidateViaConnector = isFabricFallbackFile(candidateTags, loader, forgeCompatible);
+
+        switch (installed) {
+            case CONNECTOR:
+                return connectorActive && candidateViaConnector;
+            case NATIVE:
+                return !candidateViaConnector;
+            default:
+                return false;
+        }
+    }
+
     private static boolean hasTag(Collection<String> tags, String loader) {
         return tags != null && tags.stream().anyMatch(loader::equalsIgnoreCase);
     }
