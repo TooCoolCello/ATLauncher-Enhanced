@@ -110,6 +110,8 @@ public class Settings {
 
     // Java/Minecraft
     public int maximumMemory = 4096;
+    // the initial heap (-Xms) in MB; 0 leaves it to Java, as before this setting existed
+    public int initialMemory = 0;
     public int metaspace = (OS.is64Bit() ? 256 : 128);
     public int windowWidth = 854;
     public int windowHeight = 480;
@@ -314,6 +316,7 @@ public class Settings {
         validateJavaPath();
 
         validateMemory();
+        validateInitialMemory();
         validateWindowSize();
 
         validateProxy();
@@ -472,6 +475,29 @@ public class Settings {
 
         if (needToSave) {
             save();
+        }
+    }
+
+    /**
+     * The initial heap to use with this maximum: unset (0) stays unset, and it's never more than the maximum, which
+     * Java would refuse to start with.
+     */
+    public static int clampInitialMemory(int initialMemory, int maximumMemory) {
+        if (initialMemory <= 0) {
+            return 0;
+        }
+
+        return Math.min(initialMemory, maximumMemory);
+    }
+
+    // after validateMemory, which may lower the maximum
+    void validateInitialMemory() {
+        int valid = clampInitialMemory(initialMemory, maximumMemory);
+
+        if (valid != initialMemory) {
+            LogManager.warn("Minimum memory of " + initialMemory + "MB isn't valid with a maximum of "
+                + maximumMemory + "MB, so using " + (valid == 0 ? "Java's default" : valid + "MB") + " instead");
+            initialMemory = valid;
         }
     }
 

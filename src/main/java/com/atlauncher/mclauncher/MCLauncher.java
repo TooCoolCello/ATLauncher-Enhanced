@@ -289,15 +289,15 @@ public class MCLauncher {
         }
         arguments.add(path);
 
-        if (OS.getMaximumRam() != 0 && maximumMemory < instance.getMemory()) {
-            if ((OS.getMaximumRam() / 2) < instance.getMemory()) {
-                arguments.add("-Xmx" + maximumMemory + "M");
-            } else {
-                arguments.add("-Xmx" + instance.getMemory() + "M");
-            }
-        } else {
-            arguments.add("-Xmx" + maximumMemory + "M");
+        int initialMemory = resolveInitialMemory(instance.launcher.initialMemory, App.settings.initialMemory);
+        if (initialMemory > 0 && setsInitialHeap(javaArguments)) {
+            LogManager.warn(
+                "Not passing the minimum memory setting, as the Java parameters already set an initial heap");
+        } else if (initialMemory > effectiveMaximumMemory(maximumMemory, instance.getMemory(), OS.getMaximumRam())) {
+            LogManager.warn("Minimum memory of " + initialMemory + "MB is more than the maximum, so using the maximum");
         }
+        arguments.addAll(heapArguments(maximumMemory, initialMemory, instance.getMemory(), OS.getMaximumRam(),
+            javaArguments));
 
         if (OS.getMaximumRam() != 0 && permGen < instance.getPermGen()
             && (OS.getMaximumRam() / 8) < instance.getPermGen()) {
@@ -461,6 +461,49 @@ public class MCLauncher {
         }
 
         return arguments;
+    }
+
+    /**
+     * The minimum memory for an instance, as with maximum memory: its own setting when it has one (0 included, to
+     * leave it to Java), else the launcher's.
+     */
+    static int resolveInitialMemory(Integer instanceSetting, int launcherSetting) {
+        return Optional.ofNullable(instanceSetting).orElse(launcherSetting);
+    }
+
+    /**
+     * The -Xmx value: the memory setting, raised to the pack's required memory when the system has room for it.
+     */
+    static int effectiveMaximumMemory(int maximumMemory, int instanceMemory, int systemRam) {
+        if (systemRam != 0 && maximumMemory < instanceMemory && (systemRam / 2) >= instanceMemory) {
+            return instanceMemory;
+        }
+
+        return maximumMemory;
+    }
+
+    /**
+     * The heap arguments, all in MB. -Xms comes first, only when a minimum is set (above 0) and the Java parameters
+     * don't already set an initial heap, so it's never passed twice; it's capped at -Xmx, as Java won't start with a
+     * larger initial heap. -Xmx follows as it always has.
+     */
+    static List<String> heapArguments(int maximumMemory, int initialMemory, int instanceMemory, int systemRam,
+        String javaArguments) {
+        int effectiveMaximum = effectiveMaximumMemory(maximumMemory, instanceMemory, systemRam);
+        List<String> arguments = new ArrayList<>();
+
+        if (initialMemory > 0 && !setsInitialHeap(javaArguments)) {
+            arguments.add("-Xms" + Math.min(initialMemory, effectiveMaximum) + "M");
+        }
+
+        arguments.add("-Xmx" + effectiveMaximum + "M");
+        return arguments;
+    }
+
+    // whether the Java parameters already set the initial heap, either way Java accepts it
+    static boolean setsInitialHeap(String javaArguments) {
+        return javaArguments != null && Arrays.stream(javaArguments.split(" "))
+            .anyMatch(arg -> arg.startsWith("-Xms") || arg.startsWith("-XX:InitialHeapSize="));
     }
 
     private static String replaceArgument(String incomingArgument, Instance instance, MicrosoftAccount account,

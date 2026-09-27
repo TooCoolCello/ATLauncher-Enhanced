@@ -56,6 +56,7 @@ import com.atlauncher.Data;
 import com.atlauncher.builders.HTMLBuilder;
 import com.atlauncher.constants.UIConstants;
 import com.atlauncher.data.Instance;
+import com.atlauncher.data.Settings;
 import com.atlauncher.data.minecraft.JavaRuntime;
 import com.atlauncher.gui.components.JLabelWithHover;
 import com.atlauncher.managers.DialogManager;
@@ -70,6 +71,7 @@ public class JavaInstanceSettingsTab extends JPanel {
     private final Instance instance;
 
     private JSpinner maximumMemory;
+    private JSpinner initialMemory;
     private JSpinner permGen;
     private JTextField javaPath;
     private JTextArea javaParameters;
@@ -125,6 +127,28 @@ public class JavaInstanceSettingsTab extends JPanel {
         maximumMemory = new JSpinner(maximumMemoryModel);
         ((JSpinner.DefaultEditor) maximumMemory.getEditor()).getTextField().setColumns(5);
         add(maximumMemory, gbc);
+
+        // Minimum Memory Settings
+        gbc.gridx = 0;
+        gbc.gridy++;
+        gbc.insets = UIConstants.LABEL_INSETS;
+        gbc.anchor = GridBagConstraints.BASELINE_TRAILING;
+        JLabelWithHover initialMemoryLabel = new JLabelWithHover(GetText.tr("Minimum Memory/Ram") + ":", HELP_ICON,
+            "<html>" + Utils.splitMultilinedString(GetText.tr(
+                "The memory/ram Java starts Minecraft with (-Xms). Leave at 0 to let Java decide. It can't be more "
+                    + "than the maximum memory/ram."), 80, "<br/>") + "</html>");
+        add(initialMemoryLabel, gbc);
+
+        gbc.gridx++;
+        gbc.insets = UIConstants.FIELD_INSETS;
+        gbc.anchor = GridBagConstraints.BASELINE_LEADING;
+        SpinnerNumberModel initialMemoryModel = new SpinnerNumberModel(
+            getIfNotNull(this.instance.launcher.initialMemory, App.settings.initialMemory), null, null, 512);
+        initialMemoryModel.setMinimum(0);
+        initialMemoryModel.setMaximum((systemRam == 0 ? null : systemRam));
+        initialMemory = new JSpinner(initialMemoryModel);
+        ((JSpinner.DefaultEditor) initialMemory.getEditor()).getTextField().setColumns(5);
+        add(initialMemory, gbc);
 
         // Perm Gen Settings
         gbc.gridx = 0;
@@ -588,8 +612,27 @@ public class JavaInstanceSettingsTab extends JPanel {
         return true;
     }
 
+    /**
+     * The minimum can't be more than the maximum: Java won't start with it.
+     */
+    public boolean isValidMemory() {
+        int initialMemory = (Integer) this.initialMemory.getValue();
+        int maximumMemory = (Integer) this.maximumMemory.getValue();
+
+        if (Settings.clampInitialMemory(initialMemory, maximumMemory) != initialMemory) {
+            DialogManager.okDialog().setTitle(GetText.tr("Help")).setContent(new HTMLBuilder().center().text(GetText.tr(
+                    "The minimum memory/ram ({0}MB) can't be more than the maximum memory/ram ({1}MB).<br/><br/>"
+                        + "Please lower the minimum, or set it to 0 to let Java decide.",
+                    initialMemory, maximumMemory))
+                .build()).setType(DialogManager.ERROR).show();
+            return false;
+        }
+        return true;
+    }
+
     public void saveSettings() {
         Integer maximumMemory = (Integer) this.maximumMemory.getValue();
+        Integer initialMemory = (Integer) this.initialMemory.getValue();
         Integer permGen = (Integer) this.permGen.getValue();
         String javaPath = this.javaPath.getText();
         String javaParameters = this.javaParameters.getText();
@@ -603,6 +646,7 @@ public class JavaInstanceSettingsTab extends JPanel {
         Boolean useSystemOpenAlVal = ((ComboItem<Boolean>) useSystemOpenAl.getSelectedItem()).getValue();
 
         this.instance.launcher.maximumMemory = (maximumMemory == App.settings.maximumMemory ? null : maximumMemory);
+        this.instance.launcher.initialMemory = (initialMemory == App.settings.initialMemory ? null : initialMemory);
         this.instance.launcher.permGen = (permGen == App.settings.metaspace ? null : permGen);
 
         boolean instanceWillUseMinecraftProvidedJava = Optional.ofNullable(useJavaProvidedByMinecraftVal)

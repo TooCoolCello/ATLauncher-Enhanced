@@ -2506,6 +2506,11 @@ public class InstanceInstaller extends SwingWorker<Boolean, Void> implements Net
                 if (multiMCManifest.config.maximumMemory != null) {
                     instanceLauncher.maximumMemory = multiMCManifest.config.maximumMemory;
                 }
+                Integer initialMemory = multiMCManifest.config.initialMemoryWithin(
+                        Optional.ofNullable(instanceLauncher.maximumMemory).orElse(App.settings.maximumMemory));
+                if (initialMemory != null) {
+                    instanceLauncher.initialMemory = initialMemory;
+                }
             }
 
             if (instanceLauncher.curseForgeManifest != null) {

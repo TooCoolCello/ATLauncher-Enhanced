@@ -19,11 +19,15 @@ package com.atlauncher.data.multimc;
 
 import java.util.Properties;
 
+import com.atlauncher.data.Settings;
+
 public class MultiMCInstanceConfig {
     public String name;
 
     public String iconKey;
     public Integer maximumMemory;
+    // MinMemAlloc, when MultiMC applied it to this instance; null otherwise
+    public Integer initialMemory;
     public Integer permGen;
     public String javaPath;
     public String javaArguments;
@@ -44,6 +48,16 @@ public class MultiMCInstanceConfig {
 
         if (props.getProperty("MaxMemAlloc") != null) {
             maximumMemory = Integer.parseInt(props.getProperty("MaxMemAlloc"));
+        }
+
+        // only a minimum MultiMC applies to this instance (OverrideMemory) is its own; without that, MultiMC's global
+        // default is in play, so the instance follows the launcher's setting instead
+        if (Boolean.parseBoolean(props.getProperty("OverrideMemory")) && props.getProperty("MinMemAlloc") != null) {
+            try {
+                initialMemory = Integer.parseInt(props.getProperty("MinMemAlloc").trim());
+            } catch (NumberFormatException e) {
+                initialMemory = null;
+            }
         }
 
         if (props.getProperty("PermGen") != null) {
@@ -68,5 +82,13 @@ public class MultiMCInstanceConfig {
         if (props.getProperty("WrapperCommand") != null) {
             wrapperCommand = props.getProperty("WrapperCommand");
         }
+    }
+
+    /**
+     * The minimum memory to give the imported instance, checked like any loaded minimum against the maximum it will
+     * run with: never above it, and 0 or below leaves it to Java. Null to follow the launcher's setting.
+     */
+    public Integer initialMemoryWithin(int maximumMemory) {
+        return initialMemory == null ? null : Settings.clampInitialMemory(initialMemory, maximumMemory);
     }
 }

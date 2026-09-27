@@ -117,6 +117,30 @@ public class JavaSettingsTab extends AbstractSettingsTab {
         addDisposable(viewModel.getMaxRam().subscribe(maximumMemory::setValue));
         add(maximumMemory, gbc);
 
+        // Minimum Memory Settings
+        gbc.gridx = 0;
+        gbc.gridy++;
+        gbc.insets = UIConstants.LABEL_INSETS;
+        gbc.anchor = GridBagConstraints.BASELINE_TRAILING;
+        JLabelWithHover initialMemoryLabel = new JLabelWithHover(GetText.tr("Minimum Memory/Ram") + ":", HELP_ICON,
+            new HTMLBuilder().center().split(100).text(GetText.tr(
+                    "The memory/ram Java starts Minecraft with (-Xms). Leave at 0 to let Java decide. It can't be more "
+                        + "than the maximum memory/ram."))
+                .build());
+        add(initialMemoryLabel, gbc);
+
+        gbc.gridx++;
+        gbc.insets = UIConstants.FIELD_INSETS;
+        gbc.anchor = GridBagConstraints.BASELINE_LEADING;
+        SpinnerNumberModel initialMemoryModel = new SpinnerNumberModel(App.settings.initialMemory, null, null, 512);
+        initialMemoryModel.setMinimum(0);
+        initialMemoryModel.setMaximum(maximumSystemRamForSpinnerModels);
+        JSpinner initialMemory = new JSpinner(initialMemoryModel);
+        ((JSpinner.DefaultEditor) initialMemory.getEditor()).getTextField().setColumns(5);
+        initialMemory.addChangeListener(e -> viewModel.setInitialRam((Integer) initialMemory.getValue()));
+        addDisposable(viewModel.getInitialRam().subscribe(initialMemory::setValue));
+        add(initialMemory, gbc);
+
         // Perm Gen Settings
         gbc.gridx = 0;
         gbc.gridy++;

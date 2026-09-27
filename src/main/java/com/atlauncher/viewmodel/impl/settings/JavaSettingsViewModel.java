@@ -33,6 +33,7 @@ import com.atlauncher.App;
 import com.atlauncher.constants.Constants;
 import com.atlauncher.data.CheckState;
 import com.atlauncher.data.ScreenResolution;
+import com.atlauncher.data.Settings;
 import com.atlauncher.evnt.listener.SettingsListener;
 import com.atlauncher.evnt.manager.SettingsManager;
 import com.atlauncher.gui.tabs.settings.JavaSettingsTab;
@@ -54,6 +55,7 @@ public class JavaSettingsViewModel implements SettingsListener {
     private static final long JAVA_INSTALL_LOCATION_CHECK_DELAY = 2000;
 
     private final BehaviorSubject<Integer> _maxRam = BehaviorSubject.create(),
+        _initialRam = BehaviorSubject.create(),
         _metaspace = BehaviorSubject.create(),
         _width = BehaviorSubject.create(),
         _height = BehaviorSubject.create();
@@ -198,6 +200,7 @@ public class JavaSettingsViewModel implements SettingsListener {
     @Override
     public void onSettingsSaved() {
         _maxRam.onNext(App.settings.maximumMemory);
+        _initialRam.onNext(App.settings.initialMemory);
         _metaspace.onNext(App.settings.metaspace);
         _width.onNext(App.settings.windowWidth);
         _height.onNext(App.settings.windowHeight);
@@ -263,11 +266,27 @@ public class JavaSettingsViewModel implements SettingsListener {
      */
     public void setMaxRam(int maxRam) {
         App.settings.maximumMemory = maxRam;
+        // a lower maximum takes the minimum down with it, so the two never contradict
+        App.settings.initialMemory = Settings.clampInitialMemory(App.settings.initialMemory, maxRam);
         SettingsManager.post();
     }
 
     public Observable<Integer> getMaxRam() {
         return _maxRam.observeOn(SwingSchedulers.edt());
+    }
+
+    /**
+     * Set the minimum ram (-Xms), 0 to leave it to Java. It's kept at or below the maximum.
+     *
+     * @param initialRam minimum ram value
+     */
+    public void setInitialRam(int initialRam) {
+        App.settings.initialMemory = Settings.clampInitialMemory(initialRam, App.settings.maximumMemory);
+        SettingsManager.post();
+    }
+
+    public Observable<Integer> getInitialRam() {
+        return _initialRam.observeOn(SwingSchedulers.edt());
     }
 
     public int getPermGenMaxRecommendSize() {
