@@ -513,9 +513,10 @@ public class DisableableMod implements Serializable {
      * Which CurseForge files may update this one: files for the loader that keep the installed file's loader path (see
      * {@link SinytraConnector#keepsLoaderPath}). A Fabric file installed through Connector updates only to Fabric
      * files for this exact Minecraft version, whatever the Add Mod Restriction, and to none while Connector is
-     * inactive. On Forge or NeoForge, a file whose loader can't be established gets no updates.
+     * inactive. A Forge-only file on NeoForge stays on Forge-only files, and a Fabric-only file on Quilt on Fabric-only
+     * files. On Forge, NeoForge or Quilt, a file whose loader can't be established gets no updates.
      */
-    Predicate<CurseForgeFile> curseForgeUpdateCandidate(ModManagement instanceOrServer,
+    public Predicate<CurseForgeFile> curseForgeUpdateCandidate(ModManagement instanceOrServer,
             List<CurseForgeFile> projectFiles, List<String> neoForgeForgeCompatibleVersions) {
         LoaderVersion loader = instanceOrServer.getLoaderVersion();
         String minecraftVersion = instanceOrServer.getMinecraftVersion();
@@ -530,7 +531,7 @@ public class DisableableMod implements Serializable {
                         : isForLoader(cf.gameVersions, loader, forgeCompatible));
     }
 
-    SinytraConnector.InstalledPath curseForgeInstalledPath(ModManagement instanceOrServer,
+    public SinytraConnector.InstalledPath curseForgeInstalledPath(ModManagement instanceOrServer,
             List<CurseForgeFile> projectFiles, List<String> neoForgeForgeCompatibleVersions) {
         return SinytraConnector.installedPath(installedCurseForgeTags(projectFiles),
                 instanceOrServer.getLoaderVersion(),
@@ -620,7 +621,7 @@ public class DisableableMod implements Serializable {
      *
      * @param projectVersions the project's versions, or null when the stored loaders are all there is
      */
-    SinytraConnector.InstalledPath modrinthInstalledPath(ModManagement instanceOrServer,
+    public SinytraConnector.InstalledPath modrinthInstalledPath(ModManagement instanceOrServer,
             List<ModrinthVersion> projectVersions, List<String> neoForgeForgeCompatibleVersions) {
         List<String> loaders = modrinthVersion.loaders;
 
@@ -639,8 +640,9 @@ public class DisableableMod implements Serializable {
      * {@link SinytraConnector#keepsLoaderPath}). Connector updates must also be for this exact Minecraft version,
      * whatever the Add Mod Restriction.
      */
-    List<ModrinthVersion> modrinthUpdateCandidates(ModManagement instanceOrServer, List<ModrinthVersion> versions,
-            SinytraConnector.InstalledPath installedPath, List<String> neoForgeForgeCompatibleVersions) {
+    public List<ModrinthVersion> modrinthUpdateCandidates(ModManagement instanceOrServer,
+            List<ModrinthVersion> versions, SinytraConnector.InstalledPath installedPath,
+            List<String> neoForgeForgeCompatibleVersions) {
         LoaderVersion loader = instanceOrServer.getLoaderVersion();
         String minecraftVersion = instanceOrServer.getMinecraftVersion();
         boolean forgeCompatible = neoForgeForgeCompatibleVersions.contains(minecraftVersion);

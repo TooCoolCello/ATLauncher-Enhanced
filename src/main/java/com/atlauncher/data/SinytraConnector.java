@@ -18,6 +18,7 @@
 package com.atlauncher.data;
 
 import java.util.Collection;
+import java.util.List;
 
 import com.atlauncher.constants.Constants;
 import com.atlauncher.data.minecraft.loaders.LoaderVersion;
@@ -92,24 +93,45 @@ public final class SinytraConnector {
     }
 
     /**
-     * Which loader path an installed file runs on.
+     * Which loader path an installed file runs on: the same paths the Add Mods "Mod loader" dropdown tells apart (see
+     * {@link LoaderChoice}), so Update and Reinstall can keep a file on the path it was installed through.
      */
     public enum InstalledPath {
-        NATIVE, CONNECTOR,
-        /** On Forge or NeoForge with no loader metadata: it could be a Fabric file running through Connector. */
-        UNKNOWN
+        /** Made for the instance's own loader, also tagged for it, or untagged, as the native list showed it. */
+        NATIVE,
+        /** A Forge-only file on NeoForge. */
+        FORGE_COMPATIBLE,
+        /** A Fabric-only file on Quilt. */
+        FABRIC_VIA_QUILT,
+        /** A Fabric-only file on Forge or NeoForge, running through Connector. */
+        CONNECTOR,
+        /** No loader metadata on a loader with more than one path, so it can't be told which one. */
+        UNKNOWN;
+
+        static InstalledPath of(LoaderChoice choice) {
+            switch (choice) {
+                case FORGE_COMPATIBLE:
+                    return FORGE_COMPATIBLE;
+                case FABRIC_VIA_QUILT:
+                    return FABRIC_VIA_QUILT;
+                case FABRIC_VIA_CONNECTOR:
+                    return CONNECTOR;
+                default:
+                    return NATIVE;
+            }
+        }
     }
 
     /**
-     * Which loader path an installed file runs on, from its loader tags. Only Forge and NeoForge can run a file through
-     * Connector, so elsewhere every file is native. A file whose tags carry no loader follows the usual "untagged" rule
-     * and counts as native.
+     * Which loader path an installed file runs on, from its loader tags, classified as the Add Mods dropdown lists
+     * files. A file tagged for the instance's own loader as well as another, or tagged with no loader, is native, as
+     * that's where the dropdown put it. Loaders with only one path (Fabric and the like) have every file native.
      *
      * @param installedTags the installed file's tags; null or empty when unknown
      */
     public static InstalledPath installedPath(Collection<String> installedTags, LoaderVersion loader,
             boolean forgeCompatible) {
-        if (loader == null || !(loader.isForge() || loader.isNeoForge())) {
+        if (loader == null || !(loader.isForge() || loader.isNeoForge() || loader.isQuilt())) {
             return InstalledPath.NATIVE;
         }
 
@@ -117,28 +139,41 @@ public final class SinytraConnector {
             return InstalledPath.UNKNOWN;
         }
 
-        return isFabricFallbackFile(installedTags, loader, forgeCompatible) ? InstalledPath.CONNECTOR
-                : InstalledPath.NATIVE;
+        return InstalledPath.of(LoaderChoice.of(installedTags, loader, forgeCompatible));
     }
 
     /**
-     * Whether a file can update an installed one without changing its loader path. A file installed through Connector
-     * only updates to another Connector file, and only while Connector is active. A native file never updates to a
-     * Connector one. A file on an unknown path gets no updates. Switching paths would need a separate migration
-     * action, not an update.
+     * Whether a file can update an installed one without changing its loader path: the candidate must list under the
+     * same path. A file installed through Connector also needs Connector still active. A file on an unknown path gets
+     * no updates. Switching paths would need a separate migration action, not an update.
      */
     public static boolean keepsLoaderPath(InstalledPath installed, boolean connectorActive,
             Collection<String> candidateTags, LoaderVersion loader, boolean forgeCompatible) {
-        boolean candidateViaConnector = isFabricFallbackFile(candidateTags, loader, forgeCompatible);
-
-        switch (installed) {
-            case CONNECTOR:
-                return connectorActive && candidateViaConnector;
-            case NATIVE:
-                return !candidateViaConnector;
-            default:
-                return false;
+        if (installed == InstalledPath.UNKNOWN) {
+            return false;
         }
+
+        InstalledPath candidate = InstalledPath.of(LoaderChoice.of(candidateTags, loader, forgeCompatible));
+        return candidate == installed && (installed != InstalledPath.CONNECTOR || connectorActive);
+    }
+
+    /**
+     * Whether a file is a Fabric build that only runs here through Connector and lists this exact Minecraft version.
+     * Those are the only Fabric files a new install offers through Connector, whatever the Add Mod Restriction.
+     */
+    public static boolean isConnectorBuild(Collection<String> loaderTags, Collection<String> gameVersions,
+            String minecraftVersion, LoaderVersion loader, boolean forgeCompatible) {
+        return isFabricFallbackFile(loaderTags, loader, forgeCompatible) && gameVersions != null
+                && gameVersions.contains(minecraftVersion);
+    }
+
+    /**
+     * Whether Add may install the selected file right now: it's still listed, and if it needs Connector, Connector is
+     * still active. Guards a dialog left open while Connector is disabled or removed.
+     */
+    public static <T> boolean mayInstall(List<T> listed, T selected, boolean needsConnector,
+            boolean connectorActiveNow) {
+        return selected != null && listed.contains(selected) && (!needsConnector || connectorActiveNow);
     }
 
     private static boolean hasTag(Collection<String> tags, String loader) {

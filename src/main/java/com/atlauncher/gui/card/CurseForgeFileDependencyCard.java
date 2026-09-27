@@ -27,6 +27,7 @@ import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JTextArea;
+import javax.swing.UIManager;
 import javax.swing.border.EmptyBorder;
 import javax.swing.border.TitledBorder;
 
@@ -34,77 +35,106 @@ import org.mini2Dx.gettext.GetText;
 
 import com.atlauncher.App;
 import com.atlauncher.data.ModManagement;
+import com.atlauncher.data.RequiredDependency;
 import com.atlauncher.data.curseforge.CurseForgeAttachment;
-import com.atlauncher.data.curseforge.CurseForgeFileDependency;
 import com.atlauncher.data.curseforge.CurseForgeProject;
 import com.atlauncher.gui.dialogs.CurseForgeProjectFileSelectorDialog;
 import com.atlauncher.network.Analytics;
 import com.atlauncher.network.analytics.AnalyticsEvent;
-import com.atlauncher.utils.CurseForgeApi;
 import com.atlauncher.utils.OS;
 import com.atlauncher.utils.Utils;
 import com.atlauncher.workers.BackgroundImageWorker;
 
 public final class CurseForgeFileDependencyCard extends JPanel {
     private final CurseForgeProjectFileSelectorDialog parent;
-    private final CurseForgeFileDependency dependency;
+    private final CurseForgeProject mod;
     private final ModManagement instanceOrServer;
+    private final RequiredDependency.State state;
+    private final String status;
+    private final boolean preferConnectorBuilds;
 
-    public CurseForgeFileDependencyCard(CurseForgeProjectFileSelectorDialog parent, CurseForgeFileDependency dependency,
-            ModManagement instanceOrServer) {
+    /**
+     * @param mod                   the dependency's project, or null when it couldn't be found
+     * @param status                what to tell the user about its installed state, or null
+     * @param preferConnectorBuilds whether the file needing it runs through Connector, so its selector suggests a
+     *                              Fabric build
+     */
+    public CurseForgeFileDependencyCard(CurseForgeProjectFileSelectorDialog parent, CurseForgeProject mod,
+            ModManagement instanceOrServer, RequiredDependency.State state, String status,
+            boolean preferConnectorBuilds) {
         this.parent = parent;
+        this.mod = mod;
+        this.instanceOrServer = instanceOrServer;
+        this.state = state;
+        this.status = status;
+        this.preferConnectorBuilds = preferConnectorBuilds;
 
         setLayout(new BorderLayout());
         setPreferredSize(new Dimension(250, 180));
 
-        this.dependency = dependency;
-        this.instanceOrServer = instanceOrServer;
-
         setupComponents();
     }
 
-    private void setupComponents() {
-        CurseForgeProject mod = CurseForgeApi.getProjectById(dependency.modId);
+    private static JTextArea wrappedText(String text) {
+        JTextArea area = new JTextArea(text);
+        area.setBorder(BorderFactory.createEmptyBorder(0, 5, 5, 5));
+        area.setEditable(false);
+        area.setHighlighter(null);
+        area.setLineWrap(true);
+        area.setWrapStyleWord(true);
+        area.setOpaque(false);
+        return area;
+    }
 
+    private void setupComponents() {
         JPanel summaryPanel = new JPanel(new BorderLayout());
-        JTextArea summary = new JTextArea();
-        summary.setText(mod.summary);
-        summary.setBorder(BorderFactory.createEmptyBorder(0, 5, 5, 5));
-        summary.setEditable(false);
-        summary.setHighlighter(null);
-        summary.setLineWrap(true);
-        summary.setWrapStyleWord(true);
-        summary.setEditable(false);
+        JTextArea summary = wrappedText(mod == null ? "" : mod.summary);
 
         JLabel icon = new JLabel(Utils.getIconImage("/assets/image/no-icon.png"));
         icon.setBorder(BorderFactory.createEmptyBorder(0, 5, 0, 5));
         icon.setVisible(false);
 
+        if (status != null) {
+            JTextArea statusText = wrappedText(status);
+            statusText.setForeground(UIManager.getColor("yellow"));
+            summaryPanel.add(statusText, BorderLayout.NORTH);
+        }
+
         summaryPanel.add(icon, BorderLayout.WEST);
         summaryPanel.add(summary, BorderLayout.CENTER);
         summaryPanel.setBorder(new EmptyBorder(0, 0, 10, 0));
 
+        add(summaryPanel, BorderLayout.CENTER);
+
+        TitledBorder border = new TitledBorder(null, mod == null ? GetText.tr("Unknown Project") : mod.name,
+                TitledBorder.DEFAULT_JUSTIFICATION, TitledBorder.DEFAULT_POSITION,
+                App.THEME.getBoldFont().deriveFont(12f));
+        setBorder(border);
+
+        if (mod == null) {
+            return;
+        }
+
         JPanel buttonsPanel = new JPanel(new FlowLayout());
-        JButton addButton = new JButton(GetText.tr("Add"));
         JButton viewButton = new JButton(GetText.tr("View"));
-        buttonsPanel.add(addButton);
+
+        if (RequiredDependency.offersAdd(state)) {
+            JButton addButton = new JButton(GetText.tr("Add"));
+            buttonsPanel.add(addButton);
+
+            addButton.addActionListener(e -> {
+                Analytics.trackEvent(AnalyticsEvent.forAddMod(mod));
+                CurseForgeProjectFileSelectorDialog curseForgeProjectFileSelectorDialog = new CurseForgeProjectFileSelectorDialog(
+                        parent, mod, instanceOrServer, preferConnectorBuilds);
+                curseForgeProjectFileSelectorDialog.setVisible(true);
+                parent.reloadDependenciesPanel();
+            });
+        }
+
         buttonsPanel.add(viewButton);
-
-        addButton.addActionListener(e -> {
-            Analytics.trackEvent(AnalyticsEvent.forAddMod(mod));
-            CurseForgeProjectFileSelectorDialog curseForgeProjectFileSelectorDialog = new CurseForgeProjectFileSelectorDialog(parent, mod, instanceOrServer);
-            curseForgeProjectFileSelectorDialog.setVisible(true);
-            parent.reloadDependenciesPanel();
-        });
-
         viewButton.addActionListener(e -> OS.openWebBrowser(mod.getWebsiteUrl()));
 
-        add(summaryPanel, BorderLayout.CENTER);
         add(buttonsPanel, BorderLayout.SOUTH);
-
-        TitledBorder border = new TitledBorder(null, mod.name, TitledBorder.DEFAULT_JUSTIFICATION,
-                TitledBorder.DEFAULT_POSITION, App.THEME.getBoldFont().deriveFont(12f));
-        setBorder(border);
 
         Optional<CurseForgeAttachment> attachment = mod.getLogo();
         attachment.ifPresent(

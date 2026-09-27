@@ -209,8 +209,10 @@ public class SinytraModUpdateTest {
             assertFalse(hasUpdate(installed, target, cf(100, MC, "Fabric"), cf(200, MC, "NeoForge")));
         }
 
+        // Quilt keeps a Quilt file on Quilt files, rather than switching it to a Fabric-only build
         DisableableMod onQuilt = installedCurseForge(cf(100, MC, "Quilt"));
-        assertTrue(hasUpdate(onQuilt, instance(QUILT), cf(100, MC, "Quilt"), cf(200, MC, "Fabric")));
+        assertTrue(hasUpdate(onQuilt, instance(QUILT), cf(100, MC, "Quilt"), cf(200, MC, "Quilt")));
+        assertFalse(hasUpdate(onQuilt, instance(QUILT), cf(100, MC, "Quilt"), cf(200, MC, "Fabric")));
     }
 
     @Test

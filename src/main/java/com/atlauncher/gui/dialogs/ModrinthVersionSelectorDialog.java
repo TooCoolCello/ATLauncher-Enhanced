@@ -26,6 +26,8 @@ import java.awt.Window;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -46,7 +48,9 @@ import com.atlauncher.App;
 import com.atlauncher.constants.Constants;
 import com.atlauncher.data.AddModRestriction;
 import com.atlauncher.data.DisableableMod;
+import com.atlauncher.data.LoaderChoice;
 import com.atlauncher.data.ModManagement;
+import com.atlauncher.data.RequiredDependency;
 import com.atlauncher.data.SinytraConnector;
 import com.atlauncher.data.minecraft.loaders.LoaderVersion;
 import com.atlauncher.data.modrinth.ModrinthDependency;
@@ -93,6 +97,15 @@ public class ModrinthVersionSelectorDialog extends JDialog {
         GetText.tr("Uses Sinytra Connector; compatibility is not guaranteed."), JLabel.CENTER);
     private volatile boolean fabricFallbackAllowed = false;
     private volatile boolean forgeCompatible = false;
+    // a new install's loader path, native first; per dialog and never saved, shown only when there's a choice
+    private final JComboBox<ComboItem<LoaderChoice>> loaderDropdown = new JComboBox<>();
+    private final JPanel loaderPanel = new JPanel(new FlowLayout());
+    private volatile boolean loaderChoicesReady = false;
+    private final List<ModrinthVersion> allVersions = new ArrayList<>();
+    // opened for a dependency: suggest a Fabric build for a Connector parent, and select its declared version
+    private boolean preferConnectorBuilds = false;
+    private String requiredVersionId = null;
+    private final JLabel overrideNoteLabel = new JLabel("", JLabel.CENTER);
 
     private JLabel filesLabel;
     private JComboBox<ComboItem<ModrinthFile>> filesDropdown;
@@ -123,10 +136,31 @@ public class ModrinthVersionSelectorDialog extends JDialog {
 
     public ModrinthVersionSelectorDialog(Window parent, ModrinthProject mod, ModManagement instanceOrServer,
         ModrinthDownloadMetadata.Reason downloadReason, String dependentVersionId) {
-        this(parent, mod, instanceOrServer, (com.atlauncher.data.Type) null);
+        this(parent, mod, instanceOrServer, downloadReason, dependentVersionId, false, null);
+    }
 
+    /**
+     * For adding a dependency.
+     *
+     * @param preferConnectorBuilds the version needing it runs through Connector: a Fabric build is suggested, and
+     *                              choosing another is flagged
+     * @param requiredVersionId     the exact version the dependency declares: it's preselected, and when it isn't
+     *                              available nothing is, so the user sees that; choosing another is flagged
+     */
+    public ModrinthVersionSelectorDialog(Window parent, ModrinthProject mod, ModManagement instanceOrServer,
+        ModrinthDownloadMetadata.Reason downloadReason, String dependentVersionId, boolean preferConnectorBuilds,
+        String requiredVersionId) {
+        super(parent, ModalityType.DOCUMENT_MODAL);
+
+        this.project = mod;
+        this.instanceOrServer = instanceOrServer;
+        this.installType = null;
         this.downloadReason = downloadReason;
         this.dependentVersionId = dependentVersionId;
+        this.preferConnectorBuilds = preferConnectorBuilds;
+        this.requiredVersionId = requiredVersionId;
+
+        setupComponents();
     }
 
     public ModrinthVersionSelectorDialog(Window parent, ModrinthProject mod, List<ModrinthVersion> versions,
@@ -242,65 +276,231 @@ public class ModrinthVersionSelectorDialog extends JDialog {
     }
 
     public void reloadDependenciesPanel() {
-        if (versionsDropdown.getSelectedItem() == null) {
+        ModrinthVersion selectedFile = (ModrinthVersion) versionsDropdown.getSelectedItem();
+
+        String override = overrideWarning(selectedFile);
+        overrideNoteLabel.setText(override == null ? "" : override);
+        overrideNoteLabel.setVisible(override != null);
+
+        if (selectedFile == null) {
             return;
         }
 
-        ModrinthVersion selectedFile = (ModrinthVersion) versionsDropdown.getSelectedItem();
-
-        connectorNoteLabel.setVisible(fabricFallbackAllowed && SinytraConnector
-            .isFabricFallbackFile(selectedFile.loaders, instanceOrServer.getLoaderVersion(), forgeCompatible));
+        // only listed while Connector is in play: the automatic fallback, the opt-in or a Connector install's update
+        connectorNoteLabel.setVisible(needsConnector(selectedFile));
 
         dependenciesPanel.setVisible(false);
 
-        List<ModrinthDependency> dependencies = selectedFile.dependencies.stream().filter(d -> d.projectId != null)
+        List<ModrinthProjectDependencyCard> cards = checkDependencies(selectedFile).stream()
+            .map(check -> new ModrinthProjectDependencyCard(this, check.project, instanceOrServer, check.state,
+                check.status, check.preferConnectorBuilds, check.requiredVersionId))
             .collect(Collectors.toList());
 
-        // this file has dependencies
-        if (!dependencies.isEmpty()) {
-            // check to see which required ones we don't already have
-            List<ModrinthDependency> dependenciesNeeded = dependencies.stream()
-                .filter(dependency -> dependency.dependencyType == ModrinthDependencyType.REQUIRED)
-                .filter(dependency -> {
-                    if (!dependency.projectId.equals(Constants.MODRINTH_FABRIC_MOD_ID)) {
-                        return true;
-                    }
+        if (!cards.isEmpty()) {
+            dependenciesPanel.removeAll();
+            cards.forEach(dependenciesPanel::add);
 
-                    // We shouldn't install Fabric API when using Sinytra Connector
-                    return !instanceOrServer.isForgeLikeAndHasInstalledSinytraConnector();
-                })
-                .filter(dependency -> instanceOrServer.getMods().stream()
-                    .noneMatch(installedMod -> providesDependency(installedMod, dependency.projectId)))
-                .collect(Collectors.toList());
+            dependenciesPanel.setLayout(new GridLayout(cards.size() < 2 ? 1 : cards.size() / 2,
+                (cards.size() / 2) + 1));
 
-            if (!dependenciesNeeded.isEmpty()) {
-                dependenciesPanel.removeAll();
+            setSize(550, 450);
+            setLocationRelativeTo(App.launcher.getParent());
 
-                dependenciesNeeded.forEach(dependency -> dependenciesPanel
-                    .add(new ModrinthProjectDependencyCard(this, dependency, instanceOrServer)));
+            dependenciesPanel.setVisible(true);
 
-                dependenciesPanel
-                    .setLayout(new GridLayout(dependenciesNeeded.size() < 2 ? 1 : dependenciesNeeded.size() / 2,
-                        (dependenciesNeeded.size() / 2) + 1));
-
-                setSize(550, 450);
-                setLocationRelativeTo(App.launcher.getParent());
-
-                dependenciesPanel.setVisible(true);
-
-                scrollPane.repaint();
-                scrollPane.validate();
-            } else {
-                setSize(550, compactHeight());
-            }
+            scrollPane.repaint();
+            scrollPane.validate();
         } else {
             setSize(550, compactHeight());
         }
     }
 
-    // room for the Connector note when it's showing
+    // one unsatisfied required dependency, as checked against what's installed right now
+    private static final class DependencyCheck {
+        private final RequiredDependency.State state;
+        private final ModrinthProject project;
+        private final String status;
+        private final String warning;
+        private final boolean preferConnectorBuilds;
+        private final String requiredVersionId;
+
+        private DependencyCheck(RequiredDependency.State state, ModrinthProject project, String status,
+            String warning, boolean preferConnectorBuilds, String requiredVersionId) {
+            this.state = state;
+            this.project = project;
+            this.status = status;
+            this.warning = warning;
+            this.preferConnectorBuilds = preferConnectorBuilds;
+            this.requiredVersionId = requiredVersionId;
+        }
+    }
+
+    /**
+     * The required dependencies of this exact version that aren't satisfied, checked against the installed mods as
+     * they are now. Used for the cards and again when Add is pressed, so an earlier card can't vouch for a
+     * dependency that has since been disabled or removed.
+     */
+    private List<DependencyCheck> checkDependencies(ModrinthVersion version) {
+        boolean parentNeedsConnector = needsConnector(version);
+        boolean connectorActive = instanceOrServer.isForgeLikeAndHasInstalledSinytraConnector();
+        List<String> neoForgeForgeCompatabilityVersions = ConfigManager
+            .getConfigItem("loaders.neoforge.forgeCompatibleMinecraftVersions", new ArrayList<>());
+        List<DisableableMod> mods = instanceOrServer.getMods();
+        List<DependencyCheck> checks = new ArrayList<>();
+
+        for (ModrinthDependency dependency : version.dependencies) {
+            if (dependency.dependencyType != ModrinthDependencyType.REQUIRED) {
+                continue;
+            }
+
+            RequiredDependency.State state;
+            DisableableMod installed = null;
+            boolean viaForgified = connectorActive && Constants.MODRINTH_FABRIC_MOD_ID.equals(dependency.projectId);
+
+            if (dependency.projectId == null) {
+                // a dependency naming only a version can't be looked up here
+                state = RequiredDependency.State.UNRESOLVED;
+            } else if (viaForgified) {
+                // Connector gets Fabric API from Forgified Fabric API, never both
+                installed = preferUsable(mods, RequiredDependency::isForgifiedFabricApi);
+                state = RequiredDependency.fabricApiUnderConnector(
+                    RequiredDependency.anyInstalled(mods,
+                        m -> RequiredDependency.isFabricApi(m) && RequiredDependency.isPresent(m)),
+                    installed != null, activity(installed));
+            } else {
+                // the known equivalents: the same library from CurseForge, or QSL for Fabric API
+                DisableableMod equivalent = preferUsable(mods, m -> providesDependency(m, dependency.projectId)
+                    && !(m.isFromModrinth() && dependency.projectId.equals(m.modrinthProject.id)));
+                if (equivalent != null) {
+                    installed = equivalent;
+                    RequiredDependency.State activity = activity(equivalent);
+                    state = activity == null ? RequiredDependency.State.SATISFIED : activity;
+                } else {
+                    installed = preferUsable(mods,
+                        m -> m.isFromModrinth() && dependency.projectId.equals(m.modrinthProject.id));
+                    state = RequiredDependency.state(installed == null ? null
+                            : installed.modrinthInstalledPath(instanceOrServer, null,
+                                neoForgeForgeCompatabilityVersions),
+                        activity(installed), parentNeedsConnector, dependency.versionId,
+                        installed == null ? null : installed.modrinthVersion.id);
+                }
+            }
+
+            if (state == RequiredDependency.State.SATISFIED) {
+                continue;
+            }
+
+            ModrinthProject dependencyProject = state == RequiredDependency.State.UNRESOLVED ? null
+                : ModrinthApi.getProject(viaForgified ? Constants.MODRINTH_FORGIFIED_FABRIC_API_MOD_ID
+                    : dependency.projectId);
+            state = RequiredDependency.withProject(state, dependencyProject);
+            String installedVersion = installed == null ? null
+                : installed.modrinthVersion != null && installed.modrinthVersion.name != null
+                    ? installed.modrinthVersion.name
+                    : installed.version;
+            boolean forDependencyItself = state == RequiredDependency.State.MISSING
+                || state == RequiredDependency.State.OTHER_VERSION;
+
+            checks.add(new DependencyCheck(state, dependencyProject,
+                RequiredDependency.status(state, parentNeedsConnector, installedVersion),
+                (dependencyProject == null ? GetText.tr("Unknown Project") : dependencyProject.title) + ": "
+                    + RequiredDependency.warning(state, parentNeedsConnector, installedVersion),
+                parentNeedsConnector && forDependencyItself, forDependencyItself ? dependency.versionId : null));
+        }
+
+        return checks;
+    }
+
+    // the matching installed entry, a usable one if there is one
+    private DisableableMod preferUsable(List<DisableableMod> mods, Predicate<DisableableMod> matches) {
+        List<DisableableMod> matching = mods.stream().filter(m -> m != null && matches.test(m))
+            .collect(Collectors.toList());
+        return matching.stream().filter(m -> activity(m) == null).findFirst()
+            .orElse(matching.isEmpty() ? null : matching.get(0));
+    }
+
+    // why an installed entry can't satisfy a dependency right now, or null (see RequiredDependency.activity)
+    private RequiredDependency.State activity(DisableableMod installed) {
+        return installed == null ? null : RequiredDependency.activity(installed,
+            CurseForgeProjectFileSelectorDialog.fileExists(instanceOrServer, installed));
+    }
+
+    // room for the notes and the loader choice when they're showing
     private int compactHeight() {
-        return connectorNoteLabel.isVisible() ? 220 : 200;
+        return 200 + (connectorNoteLabel.isVisible() ? 20 : 0) + (loaderPanel.isVisible() ? 30 : 0)
+            + (overrideNoteLabel.isVisible() ? 20 : 0);
+    }
+
+    private LoaderChoice selectedLoader() {
+        Object item = loaderDropdown.getSelectedItem();
+        return item == null ? LoaderChoice.NATIVE
+            : ((ComboItem<LoaderChoice>) item).getValue();
+    }
+
+    private LoaderChoice loaderChoiceOf(ModrinthVersion version) {
+        return LoaderChoice.of(version.loaders, instanceOrServer.getLoaderVersion(), forgeCompatible);
+    }
+
+    private List<ModrinthVersion> versionsForLoader(LoaderChoice choice) {
+        return LoaderChoice.filesFor(choice, allVersions, versions, this::loaderChoiceOf, this::isConnectorBuild);
+    }
+
+    private Predicate<ModrinthVersion> requiredVersion() {
+        return requiredVersionId == null ? null : v -> v != null && requiredVersionId.equalsIgnoreCase(v.id);
+    }
+
+    // for a dependency: a missing or departed-from declared version, or a non-Fabric build for a Connector parent
+    private String overrideWarning(ModrinthVersion selected) {
+        Predicate<ModrinthVersion> required = requiredVersion();
+
+        if (required != null && listedVersions().stream().noneMatch(required)) {
+            return GetText.tr("The declared version isn't available here; another may not meet the requirement.");
+        }
+
+        if (required != null && selected != null && !required.test(selected)) {
+            return GetText.tr("Not the declared version, so it may not meet the requirement.");
+        }
+
+        return RequiredDependency.isOverride(selected, null, preferConnectorBuilds, this::isConnectorBuild)
+            ? GetText.tr("Not a Fabric build, so it may not satisfy the Fabric mod that needs it.")
+            : null;
+    }
+
+    private boolean needsConnector(ModrinthVersion version) {
+        return SinytraConnector.isFabricFallbackFile(version.loaders, instanceOrServer.getLoaderVersion(),
+            forgeCompatible);
+    }
+
+    private boolean isConnectorBuild(ModrinthVersion version) {
+        return SinytraConnector.isConnectorBuild(version.loaders, version.gameVersions,
+            instanceOrServer.getMinecraftVersion(), instanceOrServer.getLoaderVersion(), forgeCompatible);
+    }
+
+    private List<ModrinthVersion> listedVersions() {
+        List<ModrinthVersion> listed = new ArrayList<>();
+        for (int i = 0; i < versionsDropdown.getItemCount(); i++) {
+            listed.add(versionsDropdown.getItemAt(i));
+        }
+        return listed;
+    }
+
+    // lists versions and selects one, or none, leaving Add usable only with a selection
+    private void showVersions(List<ModrinthVersion> listed, ModrinthVersion select) {
+        versionsDropdown.removeAllItems();
+        listed.forEach(versionsDropdown::addItem);
+        if (select == null) {
+            versionsDropdown.setSelectedIndex(-1);
+        } else {
+            versionsDropdown.setSelectedItem(select);
+        }
+        addButton.setEnabled(select != null);
+    }
+
+    // lists the chosen loader's versions, never leaving a version it doesn't show selected
+    private void relistVersions() {
+        ModrinthVersion selected = (ModrinthVersion) versionsDropdown.getSelectedItem();
+        List<ModrinthVersion> listed = versionsForLoader(selectedLoader());
+        showVersions(listed, LoaderChoice.selectionAfterSwitch(listed, selected));
     }
 
     /**
@@ -476,7 +676,21 @@ public class ModrinthVersionSelectorDialog extends JDialog {
         connectorNoteLabel.setForeground(UIManager.getColor("yellow"));
         connectorNoteLabel.setVisible(false);
 
-        middle.add(selectorWithConnectorNote(connectorNoteLabel, versionsPanel, filesPanel), BorderLayout.NORTH);
+        loaderPanel.add(new JLabel(GetText.tr("Mod loader") + ": "));
+        loaderPanel.add(loaderDropdown);
+        loaderPanel.setVisible(false);
+        loaderDropdown.addActionListener(e -> {
+            if (loaderChoicesReady) {
+                relistVersions();
+            }
+        });
+
+        overrideNoteLabel.setForeground(UIManager.getColor("yellow"));
+        overrideNoteLabel.setAlignmentX(CENTER_ALIGNMENT);
+        overrideNoteLabel.setVisible(false);
+
+        middle.add(selectorWithConnectorNote(connectorNoteLabel, loaderPanel, versionsPanel, filesPanel,
+            overrideNoteLabel), BorderLayout.NORTH);
         middle.add(scrollPane, BorderLayout.SOUTH);
 
         this.getFiles();
@@ -487,6 +701,28 @@ public class ModrinthVersionSelectorDialog extends JDialog {
 
         addButton.addActionListener(e -> {
             ModrinthVersion version = (ModrinthVersion) versionsDropdown.getSelectedItem();
+
+            // recheck now: the list or Connector may have changed since the version was selected
+            boolean versionNeedsConnector = version != null && needsConnector(version);
+            boolean connectorActiveNow = instanceOrServer.isForgeLikeAndHasInstalledSinytraConnector();
+            if (!SinytraConnector.mayInstall(listedVersions(), version, versionNeedsConnector, connectorActiveNow)) {
+                if (versionNeedsConnector && !connectorActiveNow) {
+                    CurseForgeProjectFileSelectorDialog.showConnectorUnavailable(this, project.title);
+                }
+                return;
+            }
+
+            List<String> warnings = new ArrayList<>();
+            String override = overrideWarning(version);
+            if (override != null) {
+                warnings.add(override);
+            }
+            // checked again now, not taken from the cards, which may predate a change to the installed mods
+            checkDependencies(version).forEach(check -> warnings.add(check.warning));
+            if (!CurseForgeProjectFileSelectorDialog.confirmDespiteWarnings(this, version.name, warnings)) {
+                return;
+            }
+
             ModrinthFile file = filesDropdown.getSelectedItem() == null ? null
                 : ((ComboItem<ModrinthFile>) filesDropdown.getSelectedItem()).getValue();
 
@@ -518,8 +754,10 @@ public class ModrinthVersionSelectorDialog extends JDialog {
         versionsDropdown.addActionListener(e -> {
             ModrinthVersion version = (ModrinthVersion) versionsDropdown.getSelectedItem();
 
+            // also with nothing selected, so a missing declared version is still explained
+            reloadDependenciesPanel();
+
             if (version != null) {
-                reloadDependenciesPanel();
 
                 filesDropdown.removeAllItems();
                 if (version.files.size() > 1) {
@@ -564,6 +802,23 @@ public class ModrinthVersionSelectorDialog extends JDialog {
         versionsDropdown.setVisible(true);
 
         Runnable r = () -> {
+            if (this.installedVersionId == null) {
+                LoaderVersion loader = instanceOrServer.getLoaderVersion();
+                String blocker = RequiredDependency.fabricApiInstallBlocker(
+                    Constants.MODRINTH_FABRIC_MOD_ID.equals(project.id),
+                    Constants.MODRINTH_FORGIFIED_FABRIC_API_MOD_ID.equals(project.id),
+                    loader != null && (loader.isForge() || loader.isNeoForge()),
+                    instanceOrServer.isForgeLikeAndHasInstalledSinytraConnector(),
+                    RequiredDependency.anyInstalled(instanceOrServer.getMods(),
+                        m -> RequiredDependency.isFabricApi(m) && RequiredDependency.isPresent(m)));
+                if (blocker != null) {
+                    DialogManager.okDialog().setParent(ModrinthVersionSelectorDialog.this)
+                        .setTitle(GetText.tr("Can't Add")).setContent(blocker).setType(DialogManager.ERROR).show();
+                    dispose();
+                    return;
+                }
+            }
+
             if (this.versionsData == null) {
                 this.versionsData = ModrinthApi.getVersions(project.id);
             }
@@ -575,11 +830,34 @@ public class ModrinthVersionSelectorDialog extends JDialog {
                 return;
             }
 
-            Stream<ModrinthVersion> modrinthVersionsStream = this.versionsData.stream()
-                .sorted(Comparator.comparing((ModrinthVersion version) -> version.datePublished).reversed());
-
             LoaderVersion loaderVersion = instanceOrServer.getLoaderVersion();
             String minecraftVersion = instanceOrServer.getMinecraftVersion();
+            List<String> neoForgeForgeCompatabilityVersions = ConfigManager
+                .getConfigItem("loaders.neoforge.forgeCompatibleMinecraftVersions", new ArrayList<>());
+            boolean modVersions = loaderVersion != null
+                && project.projectType == ModrinthProjectType.MOD
+                && this.installType != com.atlauncher.data.Type.datapack;
+
+            // a project that's already installed keeps its installed loader here, as its update would; switching
+            // loaders would need its own migration action
+            DisableableMod installedMod = this.installedVersionId != null ? null
+                : instanceOrServer.getMods().stream()
+                .filter(m -> m.isFromModrinth() && project.id.equalsIgnoreCase(m.modrinthProject.id))
+                .findFirst().orElse(null);
+            if (installedMod != null && modVersions) {
+                this.versionsData = installedMod.modrinthUpdateCandidates(instanceOrServer, this.versionsData,
+                    installedMod.modrinthInstalledPath(instanceOrServer, this.versionsData,
+                        neoForgeForgeCompatabilityVersions), neoForgeForgeCompatabilityVersions);
+                // #. {0} is the installed mod, {1} its installed version
+                installedJLabel.setText(GetText.tr("{0} is already installed ({1}); adding a version replaces it.",
+                    installedMod.name, Optional.ofNullable(installedMod.modrinthVersion.name)
+                        .orElse(installedMod.version)));
+                installedJLabel.setVisible(true);
+            }
+            boolean newInstall = this.installedVersionId == null && installedMod == null;
+
+            Stream<ModrinthVersion> modrinthVersionsStream = this.versionsData.stream()
+                .sorted(Comparator.comparing((ModrinthVersion version) -> version.datePublished).reversed());
 
             if (App.settings.addModRestriction == AddModRestriction.STRICT) {
                 modrinthVersionsStream = modrinthVersionsStream.filter(v -> v.gameVersions.contains(minecraftVersion));
@@ -596,22 +874,24 @@ public class ModrinthVersionSelectorDialog extends JDialog {
                 }
             }
 
-            if (loaderVersion != null
-                && project.projectType == ModrinthProjectType.MOD
-                && this.installType != com.atlauncher.data.Type.datapack) {
-                List<String> neoForgeForgeCompatabilityVersions = ConfigManager
-                    .getConfigItem("loaders.neoforge.forgeCompatibleMinecraftVersions", new ArrayList<>());
+            if (modVersions) {
                 forgeCompatible = neoForgeForgeCompatabilityVersions.contains(minecraftVersion);
+                boolean connectorActive = instanceOrServer.isForgeLikeAndHasInstalledSinytraConnector();
 
                 // only native versions that fit this Minecraft version rule out a Connector fallback
                 List<ModrinthVersion> versionMatched = modrinthVersionsStream.collect(Collectors.toList());
-                fabricFallbackAllowed = SinytraConnector.allowsFabricFallback(
-                    instanceOrServer.isForgeLikeAndHasInstalledSinytraConnector(), loaderVersion, forgeCompatible,
-                    versionMatched.stream().map(v -> v.loaders).collect(Collectors.toList()));
+                fabricFallbackAllowed = SinytraConnector.allowsFabricFallback(connectorActive, loaderVersion,
+                    forgeCompatible, versionMatched.stream().map(v -> v.loaders).collect(Collectors.toList()));
                 modrinthVersionsStream = versionMatched.stream();
 
+                // Connector versions only ever for this exact Minecraft version, whatever the restriction
                 modrinthVersionsStream = modrinthVersionsStream
-                    .filter(v -> acceptsLoaders(v.loaders, loaderVersion, forgeCompatible, fabricFallbackAllowed));
+                    .filter(v -> acceptsLoaders(v.loaders, loaderVersion, forgeCompatible, fabricFallbackAllowed)
+                        && (!needsConnector(v) || isConnectorBuild(v)));
+
+                allVersions.addAll(this.versionsData.stream()
+                    .sorted(Comparator.comparing((ModrinthVersion version) -> version.datePublished).reversed())
+                    .collect(Collectors.toList()));
             }
 
             if (this.installType == com.atlauncher.data.Type.datapack) {
@@ -622,7 +902,7 @@ public class ModrinthVersionSelectorDialog extends JDialog {
             versions.addAll(modrinthVersionsStream.collect(Collectors.toList()));
 
             // ensures that font width is taken into account
-            for (ModrinthVersion version : versions) {
+            for (ModrinthVersion version : this.versionsData) {
                 versionsLength = Math.max(versionsLength,
                     getFontMetrics(App.THEME.getNormalFont()).stringWidth(version.name) + 100);
             }
@@ -630,6 +910,41 @@ public class ModrinthVersionSelectorDialog extends JDialog {
             versionsDropdown.removeAllItems();
 
             versions.forEach(version -> versionsDropdown.addItem(version));
+
+            // a new install picks its loader path, native first: the paths split the versions the loader already
+            // accepted (Forge ones on NeoForge, Fabric ones on Quilt), plus Fabric via Connector where that's
+            // verified; a project that's already installed, an update and a reinstall keep their installed
+            // loader's list
+            Predicate<ModrinthVersion> required = requiredVersion();
+            if (modVersions && newInstall) {
+                List<LoaderChoice> choices = LoaderChoice.choices(versions, this::loaderChoiceOf,
+                    instanceOrServer.isForgeLikeAndHasInstalledSinytraConnector()
+                        && allVersions.stream().anyMatch(this::isConnectorBuild));
+
+                // a dependency's declared version decides the loader path; otherwise Fabric via Connector first for
+                // the automatic fallback or a Connector build's dependency
+                ModrinthVersion declared = required == null ? null
+                    : allVersions.stream().filter(required).findFirst().orElse(null);
+                LoaderChoice declaredChoice = declared == null ? null : loaderChoiceOf(declared);
+                LoaderChoice initial = declaredChoice != null && choices.contains(declaredChoice)
+                    ? declaredChoice
+                    : LoaderChoice.defaultChoice(choices, preferConnectorBuilds || fabricFallbackAllowed);
+
+                // before listing, so the first selection sizes the dialog with room for it
+                CurseForgeProjectFileSelectorDialog.showLoaderChoices(loaderDropdown, loaderPanel, choices, initial,
+                    loaderVersion);
+                loaderChoicesReady = true;
+
+                if (initial != null) {
+                    List<ModrinthVersion> listed = versionsForLoader(initial);
+                    showVersions(listed, RequiredDependency.initialSelection(listed, required, preferConnectorBuilds,
+                        this::isConnectorBuild));
+                }
+            } else if (required != null && versionsDropdown.getItemCount() != 0) {
+                // a declared version in a list kept to the installed loader: select it or show it's missing
+                showVersions(new ArrayList<>(versions), RequiredDependency.initialSelection(versions, required, false,
+                    this::isConnectorBuild));
+            }
 
             if (versionsDropdown.getItemCount() == 0) {
                 DialogManager.okDialog().setParent(ModrinthVersionSelectorDialog.this)
@@ -677,7 +992,7 @@ public class ModrinthVersionSelectorDialog extends JDialog {
             versionsDropdown.setEnabled(true);
             versionsLabel.setVisible(true);
             versionsDropdown.setVisible(true);
-            addButton.setEnabled(true);
+            addButton.setEnabled(versionsDropdown.getSelectedItem() != null);
             viewModButton.setEnabled(true);
             viewFileButton.setEnabled(true);
         };

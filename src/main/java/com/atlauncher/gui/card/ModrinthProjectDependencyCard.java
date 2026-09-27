@@ -27,6 +27,7 @@ import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JTextArea;
+import javax.swing.UIManager;
 import javax.swing.border.EmptyBorder;
 import javax.swing.border.TitledBorder;
 
@@ -34,52 +35,76 @@ import org.mini2Dx.gettext.GetText;
 
 import com.atlauncher.App;
 import com.atlauncher.data.ModManagement;
-import com.atlauncher.data.modrinth.ModrinthDependency;
+import com.atlauncher.data.RequiredDependency;
 import com.atlauncher.data.modrinth.ModrinthDownloadMetadata;
 import com.atlauncher.data.modrinth.ModrinthProject;
 import com.atlauncher.gui.dialogs.ModrinthVersionSelectorDialog;
 import com.atlauncher.network.Analytics;
 import com.atlauncher.network.analytics.AnalyticsEvent;
-import com.atlauncher.utils.ModrinthApi;
+import com.atlauncher.utils.OS;
 import com.atlauncher.utils.Utils;
 import com.atlauncher.workers.BackgroundImageWorker;
 
 public final class ModrinthProjectDependencyCard extends JPanel {
     private final ModrinthVersionSelectorDialog parent;
-    private final ModrinthDependency dependency;
+    private final ModrinthProject mod;
     private final ModManagement instanceOrServer;
+    private final RequiredDependency.State state;
+    private final String status;
+    private final boolean preferConnectorBuilds;
+    private final String requiredVersionId;
 
-    public ModrinthProjectDependencyCard(ModrinthVersionSelectorDialog parent, ModrinthDependency dependency,
-        ModManagement instanceOrServer) {
+    /**
+     * @param mod                   the dependency's project, or null when it couldn't be found
+     * @param status                what to tell the user about its installed state, or null
+     * @param preferConnectorBuilds whether the version needing it runs through Connector, so its selector suggests
+     *                              a Fabric build
+     * @param requiredVersionId     the exact version the dependency declares, or null
+     */
+    public ModrinthProjectDependencyCard(ModrinthVersionSelectorDialog parent, ModrinthProject mod,
+        ModManagement instanceOrServer, RequiredDependency.State state, String status, boolean preferConnectorBuilds,
+        String requiredVersionId) {
         this.parent = parent;
+        this.mod = mod;
+        this.instanceOrServer = instanceOrServer;
+        this.state = state;
+        this.status = status;
+        this.preferConnectorBuilds = preferConnectorBuilds;
+        this.requiredVersionId = requiredVersionId;
 
         setLayout(new BorderLayout());
         setPreferredSize(new Dimension(250, 180));
 
-        this.dependency = dependency;
-        this.instanceOrServer = instanceOrServer;
-
         setupComponents();
     }
 
+    private static JTextArea wrappedText(String text) {
+        JTextArea area = new JTextArea(text);
+        area.setBorder(BorderFactory.createEmptyBorder(0, 5, 5, 5));
+        area.setEditable(false);
+        area.setHighlighter(null);
+        area.setLineWrap(true);
+        area.setWrapStyleWord(true);
+        area.setOpaque(false);
+        return area;
+    }
+
     private void setupComponents() {
-        ModrinthProject mod = ModrinthApi.getProject(dependency.projectId);
-        String title = Optional.ofNullable(mod).map(m -> m.title).orElse("Unknown Project");
-        String description = Optional.ofNullable(mod).map(m -> m.description).orElse("Unknown Project");
+        String title = Optional.ofNullable(mod).map(m -> m.title).orElse(GetText.tr("Unknown Project"));
+        String description = Optional.ofNullable(mod).map(m -> m.description).orElse("");
 
         JPanel summaryPanel = new JPanel(new BorderLayout());
-        JTextArea summary = new JTextArea();
-        summary.setText(description);
-        summary.setBorder(BorderFactory.createEmptyBorder(0, 5, 5, 5));
-        summary.setEditable(false);
-        summary.setHighlighter(null);
-        summary.setLineWrap(true);
-        summary.setWrapStyleWord(true);
-        summary.setEditable(false);
+        JTextArea summary = wrappedText(description);
 
         JLabel icon = new JLabel(Utils.getIconImage("/assets/image/no-icon.png"));
         icon.setBorder(BorderFactory.createEmptyBorder(0, 5, 0, 5));
         icon.setVisible(false);
+
+        if (status != null) {
+            JTextArea statusText = wrappedText(status);
+            statusText.setForeground(UIManager.getColor("yellow"));
+            summaryPanel.add(statusText, BorderLayout.NORTH);
+        }
 
         summaryPanel.add(icon, BorderLayout.WEST);
         summaryPanel.add(summary, BorderLayout.CENTER);
@@ -93,22 +118,25 @@ public final class ModrinthProjectDependencyCard extends JPanel {
 
         if (mod != null) {
             JPanel buttonsPanel = new JPanel(new FlowLayout());
-            JButton addButton = new JButton(GetText.tr("Add"));
             JButton viewButton = new JButton(GetText.tr("View"));
-            buttonsPanel.add(addButton);
+
+            if (RequiredDependency.offersAdd(state)) {
+                JButton addButton = new JButton(GetText.tr("Add"));
+                buttonsPanel.add(addButton);
+
+                addButton.addActionListener(e -> {
+                    Analytics.trackEvent(AnalyticsEvent.forAddMod(mod));
+                    ModrinthVersionSelectorDialog modrinthVersionSelectorDialog = new ModrinthVersionSelectorDialog(
+                        parent, mod, instanceOrServer, ModrinthDownloadMetadata.Reason.DEPENDENCY,
+                        parent.getSelectedVersionId(), preferConnectorBuilds, requiredVersionId);
+                    modrinthVersionSelectorDialog.setVisible(true);
+                    parent.reloadDependenciesPanel();
+                });
+            }
+
             buttonsPanel.add(viewButton);
-
-            addButton.addActionListener(e -> {
-                Analytics.trackEvent(AnalyticsEvent.forAddMod(mod));
-                ModrinthVersionSelectorDialog modrinthVersionSelectorDialog = new ModrinthVersionSelectorDialog(parent,
-                    mod,
-                    instanceOrServer,
-                    ModrinthDownloadMetadata.Reason.DEPENDENCY, parent.getSelectedVersionId());
-                modrinthVersionSelectorDialog.setVisible(true);
-                parent.reloadDependenciesPanel();
-            });
-
-            viewButton.addActionListener(e -> String.format("https://modrinth.com/mod/%s", mod.slug));
+            viewButton.addActionListener(
+                e -> OS.openWebBrowser(String.format("https://modrinth.com/mod/%s", mod.slug)));
             add(buttonsPanel, BorderLayout.SOUTH);
 
             if (mod.iconUrl != null && !mod.iconUrl.isEmpty()) {
