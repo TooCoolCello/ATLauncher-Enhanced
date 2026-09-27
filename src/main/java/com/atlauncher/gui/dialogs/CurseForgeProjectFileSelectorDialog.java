@@ -68,6 +68,7 @@ public class CurseForgeProjectFileSelectorDialog extends JDialog {
     private Integer installedFileId = null;
     private boolean selectNewest = true;
     private Predicate<CurseForgeFile> updateCandidate = null;
+    private boolean reinstall = false;
 
     private final JPanel dependenciesPanel = new JPanel(new FlowLayout());
     private JScrollPane scrollPane;
@@ -102,26 +103,33 @@ public class CurseForgeProjectFileSelectorDialog extends JDialog {
      */
     public CurseForgeProjectFileSelectorDialog(Window parent, CurseForgeProject mod, ModManagement instanceOrServer,
         int installedFileId, Predicate<CurseForgeFile> updateCandidate) {
+        this(parent, mod, instanceOrServer, installedFileId, updateCandidate, false);
+    }
+
+    /**
+     * @param reinstall preselect the exact installed file, and stop with a message instead of defaulting to another
+     *                  file when it isn't offered
+     */
+    public CurseForgeProjectFileSelectorDialog(Window parent, CurseForgeProject mod, ModManagement instanceOrServer,
+        int installedFileId, Predicate<CurseForgeFile> updateCandidate, boolean reinstall) {
         super(parent, ModalityType.DOCUMENT_MODAL);
 
         this.mod = mod;
         this.instanceOrServer = instanceOrServer;
         this.installedFileId = installedFileId;
         this.updateCandidate = updateCandidate;
+        this.reinstall = reinstall;
+        this.selectNewest = !reinstall;
 
         setupComponents();
     }
 
-    public CurseForgeProjectFileSelectorDialog(Window parent, CurseForgeProject mod, ModManagement instanceOrServer,
-        int installedFileId, boolean selectNewest) {
-        super(parent, ModalityType.DOCUMENT_MODAL);
-
-        this.mod = mod;
-        this.instanceOrServer = instanceOrServer;
-        this.installedFileId = installedFileId;
-        this.selectNewest = selectNewest;
-
-        setupComponents();
+    /**
+     * The offered file with the installed file's exact ID, or null. Reinstall never falls back to another file.
+     */
+    public static CurseForgeFile installedFileToReinstall(List<CurseForgeFile> offered, Integer installedFileId) {
+        return installedFileId == null ? null
+            : offered.stream().filter(f -> f != null && f.id == installedFileId).findFirst().orElse(null);
     }
 
     private void setupComponents() {
@@ -474,6 +482,25 @@ public class CurseForgeProjectFileSelectorDialog extends JDialog {
                                 : GetText.tr("No compatible files were found for Minecraft {0}.", minecraftVersion))
                         .center().build()).setType(DialogManager.ERROR).show();
                 dispose();
+            }
+
+            if (reinstall && filesDropdown.getItemCount() != 0) {
+                List<CurseForgeFile> offered = new ArrayList<>();
+                for (int i = 0; i < filesDropdown.getItemCount(); i++) {
+                    offered.add(filesDropdown.getItemAt(i));
+                }
+
+                // a combo box ignores selecting a file it doesn't list, which left the newest file selected
+                if (installedFileToReinstall(offered, this.installedFileId) == null) {
+                    DialogManager.okDialog().setParent(CurseForgeProjectFileSelectorDialog.this)
+                        .setTitle(GetText.tr("Can't Reinstall"))
+                        .setContent(GetText.tr("The installed file for {0} isn't available to reinstall here. It may "
+                            + "have been removed, or it doesn't match this loader or Minecraft version. Nothing was "
+                            + "changed.", mod.name))
+                        .setType(DialogManager.ERROR).show();
+                    dispose();
+                    return;
+                }
             }
 
             if (this.installedFileId != null) {

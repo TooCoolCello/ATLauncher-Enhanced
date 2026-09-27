@@ -77,6 +77,7 @@ public class ModrinthVersionSelectorDialog extends JDialog {
     private String installedVersionId = null;
     private String dependentVersionId = null;
     private boolean selectNewest = true;
+    private boolean reinstall = false;
 
     private final JPanel dependenciesPanel = new JPanel(new FlowLayout());
     private JScrollPane scrollPane;
@@ -146,30 +147,43 @@ public class ModrinthVersionSelectorDialog extends JDialog {
         setupComponents();
     }
 
+    /**
+     * For Reinstall: preselects the exact installed version among {@code versions}, and stops with a message instead of
+     * defaulting to another version when it isn't offered.
+     */
+    public ModrinthVersionSelectorDialog(Window parent, ModrinthProject mod, List<ModrinthVersion> versions,
+        ModManagement instanceOrServer, String installedVersionId, com.atlauncher.data.Type installType,
+        boolean reinstall) {
+        super(parent, ModalityType.DOCUMENT_MODAL);
+
+        this.project = mod;
+        this.versionsData = versions;
+        this.instanceOrServer = instanceOrServer;
+        this.installedVersionId = installedVersionId;
+        this.installType = installType;
+        this.reinstall = reinstall;
+        this.selectNewest = !reinstall;
+
+        setupComponents();
+    }
+
+    /**
+     * The offered version with the installed version's exact ID, or null. Reinstall never falls back to another
+     * version.
+     */
+    public static ModrinthVersion installedVersionToReinstall(List<ModrinthVersion> offered,
+        String installedVersionId) {
+        return installedVersionId == null ? null
+            : offered.stream().filter(v -> v != null && installedVersionId.equalsIgnoreCase(v.id)).findFirst()
+            .orElse(null);
+    }
+
     public ModrinthVersionSelectorDialog(Window parent, ModrinthProject mod, List<ModrinthVersion> versions,
         ModManagement instanceOrServer, String installedVersionId, com.atlauncher.data.Type installType,
         ModrinthDownloadMetadata.Reason downloadReason) {
         this(parent, mod, versions, instanceOrServer, installedVersionId, installType);
 
         this.downloadReason = downloadReason;
-    }
-
-    public ModrinthVersionSelectorDialog(Window parent, ModrinthProject mod, ModManagement instanceOrServer,
-        String installedVersionId, boolean selectNewest) {
-        this(parent, mod, instanceOrServer, installedVersionId, selectNewest, null);
-    }
-
-    public ModrinthVersionSelectorDialog(Window parent, ModrinthProject mod, ModManagement instanceOrServer,
-        String installedVersionId, boolean selectNewest, com.atlauncher.data.Type installType) {
-        super(parent, ModalityType.DOCUMENT_MODAL);
-
-        this.project = mod;
-        this.instanceOrServer = instanceOrServer;
-        this.installedVersionId = installedVersionId;
-        this.selectNewest = selectNewest;
-        this.installType = installType;
-
-        setupComponents();
     }
 
     private com.atlauncher.data.Type getEffectiveInstallType(ModrinthVersion version) {
@@ -627,6 +641,18 @@ public class ModrinthVersionSelectorDialog extends JDialog {
                         : GetText.tr("No compatible files were found for Minecraft {0}.", minecraftVersion))
                     .setType(DialogManager.ERROR).show();
                 dispose();
+            }
+
+            if (reinstall && !versions.isEmpty()
+                && installedVersionToReinstall(versions, this.installedVersionId) == null) {
+                DialogManager.okDialog().setParent(ModrinthVersionSelectorDialog.this)
+                    .setTitle(GetText.tr("Can't Reinstall"))
+                    .setContent(GetText.tr("The installed version of {0} isn't available to reinstall here. It may "
+                        + "have been removed, or it doesn't match this loader or Minecraft version. Nothing was "
+                        + "changed.", project.title))
+                    .setType(DialogManager.ERROR).show();
+                dispose();
+                return;
             }
 
             if (this.installedVersionId != null) {

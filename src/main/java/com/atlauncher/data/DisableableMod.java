@@ -48,6 +48,7 @@ import com.atlauncher.gui.dialogs.CurseForgeProjectFileSelectorDialog;
 import com.atlauncher.gui.dialogs.ModrinthVersionSelectorDialog;
 import com.atlauncher.gui.dialogs.ProgressDialog;
 import com.atlauncher.managers.ConfigManager;
+import com.atlauncher.managers.DialogManager;
 import com.atlauncher.managers.LogManager;
 import com.atlauncher.managers.MinecraftManager;
 import com.atlauncher.network.Analytics;
@@ -681,40 +682,113 @@ public class DisableableMod implements Serializable {
 
         if (platform == ModPlatform.CURSEFORGE || (platform == null && isFromCurseForge()
                 && (!isFromModrinth() || App.settings.defaultModPlatform == ModPlatform.CURSEFORGE))) {
-            ProgressDialog<CurseForgeProject> dialog = new ProgressDialog<>(
+            ProgressDialog<Pair<CurseForgeProject, List<CurseForgeFile>>> dialog = new ProgressDialog<>(
                     // #. {0} is the platform were getting files from (e.g. CurseForge/Modrinth)
                     GetText.tr("Getting Files From {0}", "CurseForge"),
                     // #. {0} is the platform were getting files from (e.g. CurseForge/Modrinth)
                     0, GetText.tr("Getting Files From {0}", "CurseForge"), "Cancelled getting files from CurseForge",
                     parent);
             dialog.addThread(new Thread(() -> {
-                dialog.setReturnValue(CurseForgeApi.getProjectById(curseForgeProjectId));
+                dialog.setReturnValue(new Pair<>(CurseForgeApi.getProjectById(curseForgeProjectId),
+                        CurseForgeApi.getFilesForProject(curseForgeProjectId)));
                 dialog.close();
             }));
             dialog.start();
 
-            CurseForgeProjectFileSelectorDialog curseForgeProjectFileSelectorDialog = new CurseForgeProjectFileSelectorDialog(parent, dialog.getReturnValue(), instanceOrServer, curseForgeFileId,
-                    false);
+            Pair<CurseForgeProject, List<CurseForgeFile>> fetched = dialog.getReturnValue();
+            if (fetched == null || fetched.left() == null || fetched.right() == null) {
+                showCannotReinstall(parent, GetText.tr("Couldn't get the files for {0} from {1}. Nothing was changed.",
+                        name, "CurseForge"));
+                return false;
+            }
+
+            List<CurseForgeFile> projectFiles = fetched.right();
+            CurseForgeProjectFileSelectorDialog.markMissingTagsAsUntagged(projectFiles);
+            List<String> neoForgeForgeCompatabilityVersions = ConfigManager
+                    .getConfigItem("loaders.neoforge.forgeCompatibleMinecraftVersions", new ArrayList<>());
+
+            String blocker = reinstallBlocker(name,
+                    curseForgeInstalledPath(instanceOrServer, projectFiles, neoForgeForgeCompatabilityVersions),
+                    instanceOrServer.isForgeLikeAndHasInstalledSinytraConnector());
+            if (blocker != null) {
+                showCannotReinstall(parent, blocker);
+                return false;
+            }
+
+            // same files an update may offer, so no pick can switch the loader path; the selector preselects the
+            // installed file and stops if it isn't among them
+            CurseForgeProjectFileSelectorDialog curseForgeProjectFileSelectorDialog = new CurseForgeProjectFileSelectorDialog(
+                    parent, fetched.left(), instanceOrServer, curseForgeFileId,
+                    curseForgeUpdateCandidate(instanceOrServer, projectFiles, neoForgeForgeCompatabilityVersions), true);
             curseForgeProjectFileSelectorDialog.setVisible(true);
         } else if (platform == ModPlatform.MODRINTH || (platform == null && isFromModrinth()
                 && (!isFromCurseForge() || App.settings.defaultModPlatform == ModPlatform.MODRINTH))) {
-            ProgressDialog<ModrinthProject> dialog = new ProgressDialog<>(
+            ProgressDialog<Pair<ModrinthProject, List<ModrinthVersion>>> dialog = new ProgressDialog<>(
                     // #. {0} is the platform were getting files from (e.g. CurseForge/Modrinth)
                     GetText.tr("Getting Files From {0}", "Modrinth"), 0,
                     // #. {0} is the platform were getting files from (e.g. CurseForge/Modrinth)
                     GetText.tr("Getting Files From {0}", "Modrinth"), "Cancelled getting files from Modrinth", parent);
             dialog.addThread(new Thread(() -> {
-                dialog.setReturnValue(ModrinthApi.getProject(modrinthProject.id));
+                dialog.setReturnValue(new Pair<>(ModrinthApi.getProject(modrinthProject.id),
+                        ModrinthApi.getVersions(modrinthProject.id)));
                 dialog.close();
             }));
             dialog.start();
 
-            ModrinthVersionSelectorDialog modrinthVersionSelectorDialog = new ModrinthVersionSelectorDialog(parent, dialog.getReturnValue(), instanceOrServer, modrinthVersion.id,
-                    false, this.type);
+            Pair<ModrinthProject, List<ModrinthVersion>> fetched = dialog.getReturnValue();
+            if (fetched == null || fetched.left() == null || fetched.right() == null) {
+                showCannotReinstall(parent, GetText.tr("Couldn't get the files for {0} from {1}. Nothing was changed.",
+                        name, "Modrinth"));
+                return false;
+            }
+
+            List<String> neoForgeForgeCompatabilityVersions = ConfigManager
+                    .getConfigItem("loaders.neoforge.forgeCompatibleMinecraftVersions", new ArrayList<>());
+            SinytraConnector.InstalledPath installedPath = modrinthInstalledPath(instanceOrServer, fetched.right(),
+                    neoForgeForgeCompatabilityVersions);
+
+            String blocker = reinstallBlocker(name, installedPath,
+                    instanceOrServer.isForgeLikeAndHasInstalledSinytraConnector());
+            if (blocker != null) {
+                showCannotReinstall(parent, blocker);
+                return false;
+            }
+
+            // same versions an update may offer, so no pick can switch the loader path; the selector preselects the
+            // installed version and stops if it isn't among them
+            ModrinthVersionSelectorDialog modrinthVersionSelectorDialog = new ModrinthVersionSelectorDialog(parent,
+                    fetched.left(), modrinthUpdateCandidates(instanceOrServer, fetched.right(), installedPath,
+                            neoForgeForgeCompatabilityVersions),
+                    instanceOrServer, modrinthVersion.id, this.type, true);
             modrinthVersionSelectorDialog.setVisible(true);
         }
 
         return true;
+    }
+
+    /**
+     * Why Reinstall can't safely go ahead, or null when it can: the installed file's loader must be known, and a
+     * Fabric file running through Connector needs Connector still active to be reinstalled as one.
+     */
+    static String reinstallBlocker(String name, SinytraConnector.InstalledPath installedPath,
+            boolean connectorActive) {
+        if (installedPath == SinytraConnector.InstalledPath.UNKNOWN) {
+            return GetText.tr("Can't tell which loader the installed file for {0} is for, so it can't be reinstalled "
+                    + "safely. Nothing was changed.", name);
+        }
+
+        if (installedPath == SinytraConnector.InstalledPath.CONNECTOR && !connectorActive) {
+            return GetText.tr("{0} is a Fabric mod that runs through Sinytra Connector. To reinstall it, Sinytra "
+                    + "Connector must be installed and enabled, with \"Show Fabric Mods When Sinytra Installed?\" "
+                    + "on. Nothing was changed.", name);
+        }
+
+        return null;
+    }
+
+    private static void showCannotReinstall(Window parent, String message) {
+        DialogManager.okDialog().setParent(parent).setTitle(GetText.tr("Can't Reinstall")).setContent(message)
+                .setType(DialogManager.ERROR).show();
     }
 
     public static DisableableMod generateMod(File file, com.atlauncher.data.Type type, boolean enabled) {
