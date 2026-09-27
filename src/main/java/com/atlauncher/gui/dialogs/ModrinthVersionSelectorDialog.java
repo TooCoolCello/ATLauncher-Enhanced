@@ -18,6 +18,7 @@
 package com.atlauncher.gui.dialogs;
 
 import java.awt.BorderLayout;
+import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.GridLayout;
@@ -32,19 +33,21 @@ import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
+import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
+import javax.swing.UIManager;
 
 import org.mini2Dx.gettext.GetText;
 
 import com.atlauncher.App;
 import com.atlauncher.constants.Constants;
 import com.atlauncher.data.AddModRestriction;
-import com.atlauncher.data.Instance;
+import com.atlauncher.data.DisableableMod;
 import com.atlauncher.data.ModManagement;
-import com.atlauncher.data.Server;
+import com.atlauncher.data.SinytraConnector;
 import com.atlauncher.data.minecraft.loaders.LoaderVersion;
 import com.atlauncher.data.modrinth.ModrinthDependency;
 import com.atlauncher.data.modrinth.ModrinthDependencyType;
@@ -85,6 +88,10 @@ public class ModrinthVersionSelectorDialog extends JDialog {
     private JComboBox<ModrinthVersion> versionsDropdown;
     private final List<ModrinthVersion> versions = new ArrayList<>();
     private List<ModrinthVersion> versionsData;
+    private final JLabel connectorNoteLabel = new JLabel(
+        GetText.tr("Uses Sinytra Connector; compatibility is not guaranteed."), JLabel.CENTER);
+    private volatile boolean fabricFallbackAllowed = false;
+    private volatile boolean forgeCompatible = false;
 
     private JLabel filesLabel;
     private JComboBox<ComboItem<ModrinthFile>> filesDropdown;
@@ -227,6 +234,9 @@ public class ModrinthVersionSelectorDialog extends JDialog {
 
         ModrinthVersion selectedFile = (ModrinthVersion) versionsDropdown.getSelectedItem();
 
+        connectorNoteLabel.setVisible(fabricFallbackAllowed && SinytraConnector
+            .isFabricFallbackFile(selectedFile.loaders, instanceOrServer.getLoaderVersion(), forgeCompatible));
+
         dependenciesPanel.setVisible(false);
 
         List<ModrinthDependency> dependencies = selectedFile.dependencies.stream().filter(d -> d.projectId != null)
@@ -243,46 +253,10 @@ public class ModrinthVersionSelectorDialog extends JDialog {
                     }
 
                     // We shouldn't install Fabric API when using Sinytra Connector
-                    return instanceOrServer instanceof Server
-                        || !((Instance) instanceOrServer).isForgeLikeAndHasInstalledSinytraConnector();
+                    return !instanceOrServer.isForgeLikeAndHasInstalledSinytraConnector();
                 })
                 .filter(dependency -> instanceOrServer.getMods().stream()
-                    .noneMatch(installedMod -> {
-                        // don't show Modrinth dependency when grabbed from CurseForge
-                        if (dependency.projectId.equals(Constants.MODRINTH_FABRIC_MOD_ID)
-                            && installedMod.isFromCurseForge()
-                            && installedMod
-                            .getCurseForgeFileId() == Constants.CURSEFORGE_FABRIC_MOD_ID) {
-                            return true;
-                        }
-
-                        // don't show Modrinth dependency when grabbed from CurseForge
-                        if (dependency.projectId.equals(Constants.MODRINTH_LEGACY_FABRIC_MOD_ID)
-                            && installedMod.isFromCurseForge()
-                            && installedMod
-                            .getCurseForgeFileId() == Constants.CURSEFORGE_LEGACY_FABRIC_MOD_ID) {
-                            return true;
-                        }
-
-                        // don't show Fabric dependency when QSL is installed
-                        if (dependency.projectId.equals(Constants.MODRINTH_FABRIC_MOD_ID)
-                            && installedMod.isFromModrinth()
-                            && installedMod.modrinthProject.id
-                            .equals(Constants.MODRINTH_QSL_MOD_ID)) {
-                            return true;
-                        }
-
-                        // don't show Modrinth dependency when grabbed from CurseForge
-                        if (dependency.projectId.equals(Constants.MODRINTH_FORGIFIED_FABRIC_API_MOD_ID)
-                            && installedMod.isFromCurseForge()
-                            && installedMod
-                            .getCurseForgeFileId() == Constants.CURSEFORGE_FORGIFIED_FABRIC_API_MOD_ID) {
-                            return true;
-                        }
-
-                        return installedMod.isFromModrinth()
-                            && installedMod.modrinthProject.id.equals(dependency.projectId);
-                    }))
+                    .noneMatch(installedMod -> providesDependency(installedMod, dependency.projectId)))
                 .collect(Collectors.toList());
 
             if (!dependenciesNeeded.isEmpty()) {
@@ -303,11 +277,115 @@ public class ModrinthVersionSelectorDialog extends JDialog {
                 scrollPane.repaint();
                 scrollPane.validate();
             } else {
-                setSize(550, 200);
+                setSize(550, compactHeight());
             }
         } else {
-            setSize(550, 200);
+            setSize(550, compactHeight());
         }
+    }
+
+    // room for the Connector note when it's showing
+    private int compactHeight() {
+        return connectorNoteLabel.isVisible() ? 220 : 200;
+    }
+
+    /**
+     * Whether an installed mod already satisfies a Modrinth dependency, including the same library installed from
+     * CurseForge (matched by its CurseForge mod ID).
+     */
+    static boolean providesDependency(DisableableMod installedMod, String dependencyProjectId) {
+        // don't show Modrinth dependency when grabbed from CurseForge
+        if (dependencyProjectId.equals(Constants.MODRINTH_FABRIC_MOD_ID)
+            && installedMod.isFromCurseForge()
+            && installedMod.getCurseForgeModId() == Constants.CURSEFORGE_FABRIC_MOD_ID) {
+            return true;
+        }
+
+        // don't show Modrinth dependency when grabbed from CurseForge
+        if (dependencyProjectId.equals(Constants.MODRINTH_LEGACY_FABRIC_MOD_ID)
+            && installedMod.isFromCurseForge()
+            && installedMod.getCurseForgeModId() == Constants.CURSEFORGE_LEGACY_FABRIC_MOD_ID) {
+            return true;
+        }
+
+        // don't show Fabric dependency when QSL is installed
+        if (dependencyProjectId.equals(Constants.MODRINTH_FABRIC_MOD_ID)
+            && installedMod.isFromModrinth()
+            && installedMod.modrinthProject.id.equals(Constants.MODRINTH_QSL_MOD_ID)) {
+            return true;
+        }
+
+        // don't show Modrinth dependency when grabbed from CurseForge
+        if (dependencyProjectId.equals(Constants.MODRINTH_FORGIFIED_FABRIC_API_MOD_ID)
+            && installedMod.isFromCurseForge()
+            && installedMod.getCurseForgeModId() == Constants.CURSEFORGE_FORGIFIED_FABRIC_API_MOD_ID) {
+            return true;
+        }
+
+        return installedMod.isFromModrinth() && installedMod.modrinthProject.id.equals(dependencyProjectId);
+    }
+
+    /**
+     * Whether a mod version's loaders run on this loader. Fabric-only versions on Forge/NeoForge pass only as a
+     * Connector fallback, and versions with no loader metadata never pass.
+     */
+    static boolean acceptsLoaders(List<String> loaders, LoaderVersion loaderVersion, boolean forgeCompatible,
+        boolean fabricFallbackAllowed) {
+        if (loaders == null) {
+            return false;
+        }
+
+        if (loaders.contains("fabric")
+            && (loaderVersion.isFabric()
+            || loaderVersion.isLegacyFabric()
+            || loaderVersion.isQuilt()
+            || fabricFallbackAllowed)) {
+            return true;
+        }
+
+        if (loaders.contains("legacy-fabric") && loaderVersion.isLegacyFabric()) {
+            return true;
+        }
+
+        if (loaders.contains("neoforge") && loaderVersion.isNeoForge()) {
+            return true;
+        }
+
+        if ((loaders.contains("paper") || loaders.contains("bukkit") || loaders.contains("spigot"))
+            && loaderVersion.isPaper()) {
+            return true;
+        }
+
+        if ((loaders.contains("purpur") || loaders.contains("paper") || loaders.contains("bukkit")
+            || loaders.contains("spigot"))
+            && loaderVersion.isPurpur()) {
+            return true;
+        }
+
+        if (loaders.contains("forge") && (loaderVersion.isForge() || (loaderVersion.isNeoForge() && forgeCompatible))) {
+            return true;
+        }
+
+        return loaders.contains("quilt") && loaderVersion.isQuilt();
+    }
+
+    /**
+     * Stacks the selector rows with the Connector note under them, for the middle panel's NORTH slot. BorderLayout
+     * gives the always-present 250px dependencies scroll pane in SOUTH its full height, so anything in CENTER gets no
+     * room at the compact dialog size.
+     */
+    static JPanel selectorWithConnectorNote(JLabel connectorNote, JComponent... selectorRows) {
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+
+        for (JComponent row : selectorRows) {
+            panel.add(row);
+        }
+
+        connectorNote.setAlignmentX(Component.CENTER_ALIGNMENT);
+        panel.add(connectorNote);
+
+        return panel;
     }
 
     private void setupComponents() {
@@ -381,12 +459,10 @@ public class ModrinthVersionSelectorDialog extends JDialog {
         scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
         scrollPane.setPreferredSize(new Dimension(550, 250));
 
-        JPanel selectorPanel = new JPanel();
-        selectorPanel.setLayout(new BoxLayout(selectorPanel, BoxLayout.Y_AXIS));
-        selectorPanel.add(versionsPanel);
-        selectorPanel.add(filesPanel);
+        connectorNoteLabel.setForeground(UIManager.getColor("yellow"));
+        connectorNoteLabel.setVisible(false);
 
-        middle.add(selectorPanel, BorderLayout.NORTH);
+        middle.add(selectorWithConnectorNote(connectorNoteLabel, versionsPanel, filesPanel), BorderLayout.NORTH);
         middle.add(scrollPane, BorderLayout.SOUTH);
 
         this.getFiles();
@@ -478,7 +554,7 @@ public class ModrinthVersionSelectorDialog extends JDialog {
                 this.versionsData = ModrinthApi.getVersions(project.id);
             }
 
-            if (this.versionsData == null) {
+            if (this.versionsData == null || this.versionsData.isEmpty()) {
                 DialogManager.okDialog().setParent(ModrinthVersionSelectorDialog.this).setTitle("No versions found")
                     .setContent("No versions found for this mod").setType(DialogManager.ERROR).show();
                 dispose();
@@ -490,62 +566,6 @@ public class ModrinthVersionSelectorDialog extends JDialog {
 
             LoaderVersion loaderVersion = instanceOrServer.getLoaderVersion();
             String minecraftVersion = instanceOrServer.getMinecraftVersion();
-
-            if (App.settings.addModRestriction != AddModRestriction.NONE && loaderVersion != null
-                && project.projectType == ModrinthProjectType.MOD
-                && this.installType != com.atlauncher.data.Type.datapack) {
-                List<String> neoForgeForgeCompatabilityVersions = ConfigManager
-                    .getConfigItem("loaders.neoforge.forgeCompatibleMinecraftVersions", new ArrayList<>());
-                boolean hasNeoForgeVersion = this.versionsData.stream()
-                    .anyMatch(v -> v.loaders.contains("neoforge")
-                        || (neoForgeForgeCompatabilityVersions.contains(minecraftVersion)
-                        && v.loaders.contains("forge")));
-                boolean hasForgeVersion = this.versionsData.stream().anyMatch(v -> v.loaders.contains("forge"));
-                modrinthVersionsStream = modrinthVersionsStream.filter(v -> {
-                    if (v.loaders.contains("fabric")
-                        && (loaderVersion.isFabric()
-                        || loaderVersion.isLegacyFabric()
-                        || loaderVersion.isQuilt()
-                        || (instanceOrServer.isForgeLikeAndHasInstalledSinytraConnector()
-                        && loaderVersion.isForge() && !hasForgeVersion)
-                        || (instanceOrServer.isForgeLikeAndHasInstalledSinytraConnector()
-                        && loaderVersion.isNeoForge() && !hasNeoForgeVersion))) {
-                        return true;
-                    }
-
-                    if (v.loaders.contains("legacy-fabric") && loaderVersion.isLegacyFabric()) {
-                        return true;
-                    }
-
-                    if (v.loaders.contains("neoforge") && loaderVersion.isNeoForge()) {
-                        return true;
-                    }
-
-                    if ((v.loaders.contains("paper") || v.loaders.contains("bukkit") || v.loaders.contains("spigot"))
-                        && loaderVersion.isPaper()) {
-                        return true;
-                    }
-
-                    if ((v.loaders.contains("purpur") || v.loaders.contains("paper") || v.loaders.contains("bukkit")
-                        || v.loaders.contains("spigot"))
-                        && loaderVersion.isPurpur()) {
-                        return true;
-                    }
-
-                    if (v.loaders.contains("forge") && (loaderVersion.isForge()
-                        || (loaderVersion.isNeoForge()
-                        && neoForgeForgeCompatabilityVersions.contains(minecraftVersion)))) {
-                        return true;
-                    }
-
-                    return v.loaders.contains("quilt") && loaderVersion.isQuilt();
-                });
-            }
-
-            if (this.installType == com.atlauncher.data.Type.datapack) {
-                modrinthVersionsStream = modrinthVersionsStream
-                    .filter(v -> v.loaders != null && v.loaders.contains("datapack"));
-            }
 
             if (App.settings.addModRestriction == AddModRestriction.STRICT) {
                 modrinthVersionsStream = modrinthVersionsStream.filter(v -> v.gameVersions.contains(minecraftVersion));
@@ -562,6 +582,29 @@ public class ModrinthVersionSelectorDialog extends JDialog {
                 }
             }
 
+            if (loaderVersion != null
+                && project.projectType == ModrinthProjectType.MOD
+                && this.installType != com.atlauncher.data.Type.datapack) {
+                List<String> neoForgeForgeCompatabilityVersions = ConfigManager
+                    .getConfigItem("loaders.neoforge.forgeCompatibleMinecraftVersions", new ArrayList<>());
+                forgeCompatible = neoForgeForgeCompatabilityVersions.contains(minecraftVersion);
+
+                // only native versions that fit this Minecraft version rule out a Connector fallback
+                List<ModrinthVersion> versionMatched = modrinthVersionsStream.collect(Collectors.toList());
+                fabricFallbackAllowed = SinytraConnector.allowsFabricFallback(
+                    instanceOrServer.isForgeLikeAndHasInstalledSinytraConnector(), loaderVersion, forgeCompatible,
+                    versionMatched.stream().map(v -> v.loaders).collect(Collectors.toList()));
+                modrinthVersionsStream = versionMatched.stream();
+
+                modrinthVersionsStream = modrinthVersionsStream
+                    .filter(v -> acceptsLoaders(v.loaders, loaderVersion, forgeCompatible, fabricFallbackAllowed));
+            }
+
+            if (this.installType == com.atlauncher.data.Type.datapack) {
+                modrinthVersionsStream = modrinthVersionsStream
+                    .filter(v -> v.loaders != null && v.loaders.contains("datapack"));
+            }
+
             versions.addAll(modrinthVersionsStream.collect(Collectors.toList()));
 
             // ensures that font width is taken into account
@@ -575,8 +618,14 @@ public class ModrinthVersionSelectorDialog extends JDialog {
             versions.forEach(version -> versionsDropdown.addItem(version));
 
             if (versionsDropdown.getItemCount() == 0) {
-                DialogManager.okDialog().setParent(ModrinthVersionSelectorDialog.this).setTitle("No versions found")
-                    .setContent("No versions found for this mod").setType(DialogManager.ERROR).show();
+                DialogManager.okDialog().setParent(ModrinthVersionSelectorDialog.this)
+                    .setTitle(GetText.tr("No compatible files found"))
+                    .setContent(loaderVersion != null && project.projectType == ModrinthProjectType.MOD
+                        && this.installType != com.atlauncher.data.Type.datapack
+                        ? GetText.tr("No compatible files were found for {0} on Minecraft {1}.",
+                            loaderVersion.getLoaderType(), minecraftVersion)
+                        : GetText.tr("No compatible files were found for Minecraft {0}.", minecraftVersion))
+                    .setType(DialogManager.ERROR).show();
                 dispose();
             }
 

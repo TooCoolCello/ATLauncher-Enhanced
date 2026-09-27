@@ -36,6 +36,7 @@ import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
+import javax.swing.UIManager;
 
 import org.mini2Dx.gettext.GetText;
 
@@ -44,6 +45,7 @@ import com.atlauncher.builders.HTMLBuilder;
 import com.atlauncher.constants.Constants;
 import com.atlauncher.data.AddModRestriction;
 import com.atlauncher.data.ModManagement;
+import com.atlauncher.data.SinytraConnector;
 import com.atlauncher.data.curseforge.CurseForgeFile;
 import com.atlauncher.data.curseforge.CurseForgeFileDependency;
 import com.atlauncher.data.curseforge.CurseForgeProject;
@@ -74,6 +76,10 @@ public class CurseForgeProjectFileSelectorDialog extends JDialog {
     private JLabel installedJLabel;
     private JComboBox<CurseForgeFile> filesDropdown;
     private final List<CurseForgeFile> files = new ArrayList<>();
+    private final JLabel connectorNoteLabel = new JLabel(
+        GetText.tr("Uses Sinytra Connector; compatibility is not guaranteed."), JLabel.CENTER);
+    private volatile boolean fabricFallbackAllowed = false;
+    private volatile boolean forgeCompatible = false;
 
     public CurseForgeProjectFileSelectorDialog(CurseForgeProject mod, ModManagement instanceOrServer) {
         this(App.launcher.getParent(), mod, instanceOrServer);
@@ -165,7 +171,11 @@ public class CurseForgeProjectFileSelectorDialog extends JDialog {
         scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
         scrollPane.setPreferredSize(new Dimension(550, 250));
 
-        middle.add(filesPanel, BorderLayout.NORTH);
+        connectorNoteLabel.setForeground(UIManager.getColor("yellow"));
+        connectorNoteLabel.setVisible(false);
+
+        middle.add(ModrinthVersionSelectorDialog.selectorWithConnectorNote(connectorNoteLabel, filesPanel),
+            BorderLayout.NORTH);
         middle.add(scrollPane, BorderLayout.SOUTH);
 
         this.getFiles();
@@ -212,12 +222,29 @@ public class CurseForgeProjectFileSelectorDialog extends JDialog {
         add(bottom, BorderLayout.SOUTH);
     }
 
+    /**
+     * A file with no game version list is treated as untagged (the filters' existing rule for files without loader
+     * tags) instead of failing the background load and leaving the dialog stuck on "Loading". It can never be a
+     * Connector fallback, since that needs a Fabric tag.
+     */
+    static void markMissingTagsAsUntagged(List<CurseForgeFile> files) {
+        files.stream().filter(f -> f != null && f.gameVersions == null).forEach(f -> f.gameVersions = new ArrayList<>());
+    }
+
+    // room for the Connector note when it's showing
+    private int compactHeight() {
+        return connectorNoteLabel.isVisible() ? 220 : 200;
+    }
+
     public void reloadDependenciesPanel() {
         if (filesDropdown.getSelectedItem() == null) {
             return;
         }
 
         CurseForgeFile selectedFile = (CurseForgeFile) filesDropdown.getSelectedItem();
+
+        connectorNoteLabel.setVisible(fabricFallbackAllowed && SinytraConnector
+            .isFabricFallbackFile(selectedFile.gameVersions, instanceOrServer.getLoaderVersion(), forgeCompatible));
 
         dependenciesPanel.setVisible(false);
 
@@ -289,10 +316,10 @@ public class CurseForgeProjectFileSelectorDialog extends JDialog {
                 scrollPane.repaint();
                 scrollPane.validate();
             } else {
-                setSize(550, 200);
+                setSize(550, compactHeight());
             }
         } else {
-            setSize(550, 200);
+            setSize(550, compactHeight());
         }
     }
 
@@ -305,7 +332,7 @@ public class CurseForgeProjectFileSelectorDialog extends JDialog {
 
             List<CurseForgeFile> projectFiles = CurseForgeApi.getFilesForProject(mod.id);
 
-            if (projectFiles == null) {
+            if (projectFiles == null || projectFiles.isEmpty()) {
                 DialogManager.okDialog().setParent(CurseForgeProjectFileSelectorDialog.this)
                     .setTitle(GetText.tr("No files found"))
                     .setContent(new HTMLBuilder().text(GetText.tr(
@@ -314,6 +341,8 @@ public class CurseForgeProjectFileSelectorDialog extends JDialog {
                 dispose();
                 return;
             }
+
+            markMissingTagsAsUntagged(projectFiles);
 
             Stream<CurseForgeFile> curseForgeFilesStream = projectFiles.stream()
                 .sorted(Comparator.comparingInt((CurseForgeFile file) -> file.id).reversed());
@@ -339,11 +368,15 @@ public class CurseForgeProjectFileSelectorDialog extends JDialog {
 
             List<String> neoForgeForgeCompatabilityVersions = ConfigManager
                 .getConfigItem("loaders.neoforge.forgeCompatibleMinecraftVersions", new ArrayList<>());
-            boolean hasNeoForgeVersion = projectFiles.stream()
-                .anyMatch(v -> v.gameVersions.contains("NeoForge")
-                    || (neoForgeForgeCompatabilityVersions.contains(instanceOrServer.getMinecraftVersion())
-                    && v.gameVersions.contains("Forge")));
-            boolean hasForgeVersion = projectFiles.stream().anyMatch(v -> v.gameVersions.contains("Forge"));
+            forgeCompatible = neoForgeForgeCompatabilityVersions.contains(instanceOrServer.getMinecraftVersion());
+
+            // only native files that fit this Minecraft version rule out a Connector fallback
+            List<CurseForgeFile> versionMatchedFiles = curseForgeFilesStream.collect(Collectors.toList());
+            fabricFallbackAllowed = mod.getRootCategoryId() == Constants.CURSEFORGE_MODS_SECTION_ID
+                && SinytraConnector.allowsFabricFallback(
+                instanceOrServer.isForgeLikeAndHasInstalledSinytraConnector(), loaderVersion, forgeCompatible,
+                versionMatchedFiles.stream().map(f -> f.gameVersions).collect(Collectors.toList()));
+            curseForgeFilesStream = versionMatchedFiles.stream();
 
             // filter out files not for our loader (if browsing mods)
             if (mod.getRootCategoryId() == Constants.CURSEFORGE_MODS_SECTION_ID) {
@@ -351,11 +384,7 @@ public class CurseForgeProjectFileSelectorDialog extends JDialog {
                     if (cf.gameVersions.contains("Fabric") && loaderVersion != null
                         && (loaderVersion.isFabric() || loaderVersion.isLegacyFabric()
                         || loaderVersion.isQuilt()
-                        || (instanceOrServer.isForgeLikeAndHasInstalledSinytraConnector()
-                        && instanceOrServer.getLoaderVersion().isForge() && !hasForgeVersion)
-                        || (instanceOrServer.isForgeLikeAndHasInstalledSinytraConnector()
-                        && instanceOrServer.getLoaderVersion().isNeoForge()
-                        && !hasNeoForgeVersion))) {
+                        || fabricFallbackAllowed)) {
                         return true;
                     }
 
@@ -422,10 +451,14 @@ public class CurseForgeProjectFileSelectorDialog extends JDialog {
             }
 
             if (filesDropdown.getItemCount() == 0) {
+                String minecraftVersion = instanceOrServer.getMinecraftVersion();
                 DialogManager.okDialog().setParent(CurseForgeProjectFileSelectorDialog.this)
-                    .setTitle(GetText.tr("No files found"))
-                    .setContent(new HTMLBuilder().text(GetText.tr(
-                            "No files found for this mod. CurseForge may be down or having issues.<br/>Please wait and try again in a few minutes."))
+                    .setTitle(GetText.tr("No compatible files found"))
+                    .setContent(new HTMLBuilder().text(
+                            loaderVersion != null && mod.getRootCategoryId() == Constants.CURSEFORGE_MODS_SECTION_ID
+                                ? GetText.tr("No compatible files were found for {0} on Minecraft {1}.",
+                                    loaderVersion.getLoaderType(), minecraftVersion)
+                                : GetText.tr("No compatible files were found for Minecraft {0}.", minecraftVersion))
                         .center().build()).setType(DialogManager.ERROR).show();
                 dispose();
             }

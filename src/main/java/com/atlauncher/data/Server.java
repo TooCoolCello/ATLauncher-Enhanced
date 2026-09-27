@@ -747,11 +747,7 @@ public class Server implements ModManagement {
             return false;
         }
 
-        return mods.stream().anyMatch(m -> (m.isFromCurseForge()
-            && m.getCurseForgeModId() == Constants.CURSEFORGE_SINYTRA_CONNECTOR_MOD_ID)
-            || (m.isFromModrinth()
-            && m.modrinthProject.id.equalsIgnoreCase(Constants.MODRINTH_SINYTRA_CONNECTOR_MOD_ID)))
-            && App.settings.showFabricModsWhenSinytraInstalled;
+        return SinytraConnector.isInstalledAndEnabled(mods) && App.settings.showFabricModsWhenSinytraInstalled;
     }
 
     @Override
