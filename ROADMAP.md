@@ -63,10 +63,15 @@ below, and none is merged into `master` yet.
 
 Tests for these are under `src/test/java/com/atlauncher/` (same package as each class).
 
-## 3. Implemented locally but not yet committed
+## 2b. Committed on a fork branch
+
+For whether a branch is on `origin`, check `git branch -r --contains <commit>`.
+This file doesn't record push status because it goes stale.
+
+### Sinytra Connector selection fix
 
 **Branch:** `fix/sinytra-add-mods-selection` (based on `feature/add-mods-loader-icons`).
-**State:** working-tree changes only. Nothing is staged or committed.
+**Commit:** `dbe6a1c1` "Fix Sinytra Connector mod selection".
 
 Sinytra selector and dependency corrections:
 - enabled-Connector detection (a disabled Connector jar no longer counts);
@@ -79,22 +84,33 @@ Sinytra selector and dependency corrections:
 Files:
 - New: `data/SinytraConnector.java`
 - Modified: `data/Instance.java`, `data/Server.java`, `gui/dialogs/CurseForgeProjectFileSelectorDialog.java`, `gui/dialogs/ModrinthVersionSelectorDialog.java`
-- New tests: `src/test/java/com/atlauncher/data/SinytraConnectorTest.java`, `src/test/java/com/atlauncher/gui/dialogs/ModrinthDependencyCheckTest.java`, `src/test/java/com/atlauncher/gui/dialogs/SelectorLoaderFilterTest.java`
+- New tests: `src/test/java/com/atlauncher/data/SinytraConnectorTest.java`, `src/test/java/com/atlauncher/gui/dialogs/ModrinthDependencyCheckTest.java`, `src/test/java/com/atlauncher/gui/dialogs/SelectorLoaderFilterTest.java`, `src/test/java/com/atlauncher/gui/dialogs/ConnectorNoteLayoutTest.java`
 
 Verification:
-- Automated (last reported): **147 tests passing, `shadowJar` built.**
-- Manual: **INCOMPLETE.** Still to check with a real Forge/NeoForge instance:
-  Connector enabled vs disabled vs absent; a project with both native and Fabric
-  files for the same MC version; Modrinth dependencies resolving to the right
-  project; the selector note appearing only when a Fabric fallback is actually offered.
+- Automated (at commit): **148 tests passing, `shadowJar` built.** The native-versus-Fabric
+  selection cases, enabled/disabled Connector detection, dependency IDs, null loaders
+  and the note's layout are covered by the tests above.
+- Manual: the yellow Connector note was visually confirmed in the compact Fabric
+  version selector (NeoForge instance, Connector enabled). The layout that used
+  to hide it is fixed in this commit.
+- Manual, **not** new-fix evidence: Fabric results were absent without Connector.
+  That is existing base behavior (see section 1).
+- **Not manually tested:** the full native-versus-Fabric matrix, such as a project with
+  both native and Fabric files for the same MC version, or Connector disabled vs absent.
+  These rely on the automated coverage.
 - `.idea/gradle.xml` is an unrelated local modification. **Never stage it with this work.**
+
+## 3. Implemented locally but not yet committed
+
+Nothing at present.
 
 ## 4. Planned
 
 Grouped into phases by dependency. There are no release numbers or dates.
 
 ### Phase A — Finish Sinytra correctness
-- Complete manual verification of section 3, then commit and push.
+- Sinytra selection fix: committed as `dbe6a1c1` (section 2b). If a regression is
+  suspected, manually spot-check the untested native-versus-Fabric cases listed there.
 - Sinytra-aware mod update checks: don't offer a Fabric update in place of a
   native file, or the reverse, without saying so. Start from `EditModsDialog.java` / `DisableableMod.java`.
 - Later: an honest, contextual Sinytra icon, shown only where a Connector
