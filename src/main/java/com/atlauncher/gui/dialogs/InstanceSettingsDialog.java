@@ -23,9 +23,11 @@ import java.awt.FlowLayout;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 
+import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JDialog;
 import javax.swing.JPanel;
+import javax.swing.JScrollPane;
 import javax.swing.JTabbedPane;
 
 import org.mini2Dx.gettext.GetText;
@@ -77,7 +79,11 @@ public class InstanceSettingsDialog extends JDialog {
 
         tabbedPane.setFont(App.THEME.getNormalFont().deriveFont(17.0F));
         tabbedPane.addTab(GetText.tr("General"), generalInstanceSettingsTab);
-        tabbedPane.addTab(GetText.tr("Java/Minecraft"), javaInstanceSettingsTab);
+        // scrolls rather than squeezing its fields when it's taller than the dialog
+        JScrollPane javaScrollPane = new JScrollPane(javaInstanceSettingsTab);
+        javaScrollPane.setBorder(BorderFactory.createEmptyBorder());
+        javaScrollPane.getVerticalScrollBar().setUnitIncrement(16);
+        tabbedPane.addTab(GetText.tr("Java/Minecraft"), javaScrollPane);
         tabbedPane.addTab(GetText.tr("Commands"), commandsInstanceSettingsTab);
         tabbedPane.setOpaque(true);
 

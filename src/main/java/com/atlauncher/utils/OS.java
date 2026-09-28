@@ -69,6 +69,8 @@ public enum OS {
     LINUX, WINDOWS, OSX;
 
     private static int memory = 0;
+    // whether memory holds RAM a detection path actually read, rather than 0 or a placeholder
+    private static boolean memoryDetected = false;
     private static SystemInfo systemInfo = null;
     private static List<OSProcess> antivirusProcesses = null;
 
@@ -365,7 +367,6 @@ public enum OS {
      */
     public static int getSystemRamViaBean() {
         PerformanceManager.start();
-        long ramm;
         int ram = 0;
         OperatingSystemMXBean operatingSystemMXBean = ManagementFactory.getOperatingSystemMXBean();
         try {
@@ -373,9 +374,10 @@ public enum OS {
             m.setAccessible(true);
             Object value = m.invoke(operatingSystemMXBean);
             if (value != null) {
-                ramm = Long.parseLong(value.toString());
-                ram = (int) (ramm / 1048576);
+                ram = ramFromBeanValue(value);
+                memoryDetected = ram > 0;
             } else {
+                // unknown: existing callers keep this old placeholder, but it isn't reported as detected RAM
                 ram = 1024;
             }
         } catch (SecurityException | InvocationTargetException | IllegalAccessException | IllegalArgumentException
@@ -400,6 +402,7 @@ public enum OS {
             GlobalMemory globalMemory = hal.getMemory();
 
             ram = (int) (globalMemory.getTotal() / 1048576);
+            memoryDetected = ram > 0;
         } catch (Throwable t) {
             LogManager.logStackTrace(t);
         }
@@ -407,6 +410,35 @@ public enum OS {
         PerformanceManager.end();
 
         return ram;
+    }
+
+    /**
+     * The total physical memory in MB from the bean's reported bytes, or 0 when it can't be read.
+     */
+    static int ramFromBeanValue(Object value) {
+        if (value == null) {
+            return 0;
+        }
+
+        try {
+            long megabytes = Long.parseLong(value.toString().trim()) / 1048576;
+            return megabytes > 0 ? (int) Math.min(megabytes, Integer.MAX_VALUE) : 0;
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    /**
+     * The physical RAM in MB as actually detected, or null when it couldn't be, including when the Java 8 path fell
+     * back to its 1024MB placeholder. For anything that must not mistake a guess for this machine's RAM, such as the
+     * memory slider and its warnings; everything else keeps using {@link #getSystemRam()}.
+     */
+    public static Integer getDetectedSystemRam() {
+        return detectedOrUnknown(getSystemRam(), memoryDetected);
+    }
+
+    static Integer detectedOrUnknown(int ram, boolean detected) {
+        return detected && ram > 0 ? ram : null;
     }
 
     /**

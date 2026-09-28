@@ -467,7 +467,7 @@ public class MCLauncher {
      * The minimum memory for an instance, as with maximum memory: its own setting when it has one (0 included, to
      * leave it to Java), else the launcher's.
      */
-    static int resolveInitialMemory(Integer instanceSetting, int launcherSetting) {
+    public static int resolveInitialMemory(Integer instanceSetting, int launcherSetting) {
         return Optional.ofNullable(instanceSetting).orElse(launcherSetting);
     }
 
@@ -498,6 +498,49 @@ public class MCLauncher {
 
         arguments.add("-Xmx" + effectiveMaximum + "M");
         return arguments;
+    }
+
+    /**
+     * The heap flags a launch adds with these settings, for showing beside the Java parameters. Built by
+     * {@link #heapArguments}, as a launch is.
+     */
+    public static final class HeapPreview {
+        public final List<String> flags;
+        /** The pack's required memory raises -Xmx above the configured maximum. */
+        public final boolean raisedByPack;
+        /** A minimum is set, but the Java parameters already set the initial heap, so no -Xms is added. */
+        public final boolean initialHeapFromParameters;
+        /** No pack is known (the launcher's own settings), so an instance's pack can still raise -Xmx at launch. */
+        public final boolean packUnknown;
+        /** The saved minimum is more than the -Xmx launched with, so -Xms is lowered to match it at launch. */
+        public final boolean initialCapped;
+        /** The minimum as saved; {@link #flags} shows it as launched. */
+        public final int savedInitialMemory;
+
+        HeapPreview(List<String> flags, boolean raisedByPack, boolean initialHeapFromParameters,
+            boolean packUnknown, boolean initialCapped, int savedInitialMemory) {
+            this.flags = flags;
+            this.raisedByPack = raisedByPack;
+            this.initialHeapFromParameters = initialHeapFromParameters;
+            this.packUnknown = packUnknown;
+            this.initialCapped = initialCapped;
+            this.savedInitialMemory = savedInitialMemory;
+        }
+    }
+
+    /**
+     * @param packRequiredMemory the instance's pack's required memory, or null for the launcher's own settings
+     * @param systemRam          as the launch reads it ({@link OS#getMaximumRam()}), 0 when unknown
+     */
+    public static HeapPreview previewHeapArguments(int maximumMemory, int initialMemory, Integer packRequiredMemory,
+        int systemRam, String javaArguments) {
+        int packMemory = packRequiredMemory == null ? 0 : packRequiredMemory;
+        int effectiveMaximum = effectiveMaximumMemory(maximumMemory, packMemory, systemRam);
+        boolean initialFromParameters = initialMemory > 0 && setsInitialHeap(javaArguments);
+
+        return new HeapPreview(heapArguments(maximumMemory, initialMemory, packMemory, systemRam, javaArguments),
+            effectiveMaximum > maximumMemory, initialFromParameters, packRequiredMemory == null,
+            !initialFromParameters && initialMemory > effectiveMaximum, initialMemory);
     }
 
     // whether the Java parameters already set the initial heap, either way Java accepts it

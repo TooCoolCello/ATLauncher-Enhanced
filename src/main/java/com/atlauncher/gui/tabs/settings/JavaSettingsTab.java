@@ -35,11 +35,12 @@ import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JSpinner;
-import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingUtilities;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import javax.swing.text.AbstractDocument;
 import javax.swing.text.AttributeSet;
 import javax.swing.text.BadLocationException;
@@ -52,9 +53,13 @@ import com.atlauncher.builders.HTMLBuilder;
 import com.atlauncher.constants.UIConstants;
 import com.atlauncher.data.CheckState;
 import com.atlauncher.data.ScreenResolution;
+import com.atlauncher.gui.components.HeapFlagsPreview;
 import com.atlauncher.gui.components.JLabelWithHover;
+import com.atlauncher.gui.components.JavaParametersEditor;
+import com.atlauncher.gui.components.MemoryRangeSlider;
 import com.atlauncher.listener.DelayedSavingKeyListener;
 import com.atlauncher.managers.DialogManager;
+import com.atlauncher.mclauncher.MCLauncher;
 import com.atlauncher.utils.ComboItem;
 import com.atlauncher.utils.OS;
 import com.atlauncher.utils.Utils;
@@ -66,7 +71,8 @@ public class JavaSettingsTab extends AbstractSettingsTab {
 
     private JTextField javaPath;
     private JLabelWithHover javaPathChecker;
-    private JTextArea javaParameters;
+    private JavaParametersEditor javaParameters;
+    private HeapFlagsPreview heapFlagsPreview;
     private JLabelWithHover javaParamChecker;
     private JTextField javaInstallLocation;
     private JLabelWithHover javaInstallLocationChecker;
@@ -94,10 +100,12 @@ public class JavaSettingsTab extends AbstractSettingsTab {
 
         JPanel maximumMemoryPanel = new JPanel();
         maximumMemoryPanel.setLayout(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+        JLabelWithHover java32BitWarning = null;
         if (viewModel.isJava32Bit()) {
-            maximumMemoryPanel.add(new JLabelWithHover(WARNING_ICON, new HTMLBuilder().center().split(100).text(GetText
+            java32BitWarning = new JLabelWithHover(WARNING_ICON, new HTMLBuilder().center().split(100).text(GetText
                     .tr("You're running a 32 bit Java and therefore cannot use more than 1GB of Ram. Please see http://atl.pw/32bit for help."))
-                .build(), RESTART_BORDER));
+                .build(), RESTART_BORDER);
+            maximumMemoryPanel.add(java32BitWarning);
         }
         maximumMemoryPanel.add(maximumMemoryLabel);
 
@@ -140,6 +148,42 @@ public class JavaSettingsTab extends AbstractSettingsTab {
         initialMemory.addChangeListener(e -> viewModel.setInitialRam((Integer) initialMemory.getValue()));
         addDisposable(viewModel.getInitialRam().subscribe(initialMemory::setValue));
         add(initialMemory, gbc);
+
+        // both on one slider when this machine's RAM is known. It shows their values and takes exact ones, so the
+        // spinners above, which still hold the settings, aren't shown
+        MemoryRangeSlider memorySlider = MemoryRangeSlider.forSpinners(initialMemory, maximumMemory,
+            OS.getDetectedSystemRam());
+        if (memorySlider != null) {
+            // as last chosen; unlinked when that was never saved, however equal the values
+            memorySlider.showLinked(Boolean.TRUE.equals(App.settings.memoryLinked));
+            memorySlider.addLinkListener(viewModel::setMemoryLinked);
+
+            maximumMemoryPanel.setVisible(false);
+            maximumMemory.setVisible(false);
+            initialMemoryLabel.setVisible(false);
+            initialMemory.setVisible(false);
+
+            gbc.gridx = 0;
+            gbc.gridy++;
+            gbc.insets = UIConstants.LABEL_INSETS;
+            gbc.anchor = GridBagConstraints.FIRST_LINE_END;
+            JPanel memoryPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+            if (java32BitWarning != null) {
+                memoryPanel.add(java32BitWarning);
+            }
+            memoryPanel.add(new JLabelWithHover(GetText.tr("Memory/Ram") + ":", HELP_ICON,
+                new HTMLBuilder().center().split(100).text(GetText.tr("The memory/ram Minecraft starts with "
+                    + "(minimum, -Xms) and can use (maximum, -Xmx). Drag the slider, or click either value to type "
+                    + "it exactly in MB. At Auto, Java decides the minimum.")).build()));
+            add(memoryPanel, gbc);
+
+            gbc.gridx++;
+            gbc.insets = UIConstants.FIELD_INSETS;
+            gbc.anchor = GridBagConstraints.FIRST_LINE_START;
+            gbc.fill = GridBagConstraints.HORIZONTAL;
+            add(memorySlider, gbc);
+            gbc.fill = GridBagConstraints.NONE;
+        }
 
         // Perm Gen Settings
         gbc.gridx = 0;
@@ -365,7 +409,8 @@ public class JavaSettingsTab extends AbstractSettingsTab {
         javaParametersPanel.setLayout(new BoxLayout(javaParametersPanel, BoxLayout.X_AXIS));
         javaParametersPanel.setAlignmentY(Component.TOP_ALIGNMENT);
 
-        javaParameters = new JTextArea(6, 40);
+        javaParameters = new JavaParametersEditor();
+        heapFlagsPreview = new HeapFlagsPreview(javaParameters);
         ((AbstractDocument) javaParameters.getDocument()).setDocumentFilter(
             new DocumentFilter() {
                 @Override
@@ -381,8 +426,6 @@ public class JavaSettingsTab extends AbstractSettingsTab {
                 }
             });
         javaParamChecker = new JLabelWithHover("", null, null);
-        javaParameters.setLineWrap(true);
-        javaParameters.setWrapStyleWord(true);
         javaParameters.addKeyListener(new DelayedSavingKeyListener(
             500,
             () -> viewModel.setJavaParams(javaParameters.getText()),
@@ -409,6 +452,32 @@ public class JavaSettingsTab extends AbstractSettingsTab {
         javaParametersPanel.add(paramsResetBox);
 
         add(javaParametersPanel, gbc);
+
+        // the heap flags the memory settings add, greyed out and kept out of the Java parameters above
+        gbc.gridy++;
+        gbc.insets = UIConstants.FIELD_INSETS;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        add(heapFlagsPreview, gbc);
+        gbc.fill = GridBagConstraints.NONE;
+        javaParameters.getDocument().addDocumentListener(new DocumentListener() {
+            @Override
+            public void insertUpdate(DocumentEvent e) {
+                refreshHeapFlagsPreview();
+            }
+
+            @Override
+            public void removeUpdate(DocumentEvent e) {
+                refreshHeapFlagsPreview();
+            }
+
+            @Override
+            public void changedUpdate(DocumentEvent e) {
+                refreshHeapFlagsPreview();
+            }
+        });
+        addDisposable(viewModel.getMaxRam().subscribe(value -> refreshHeapFlagsPreview()));
+        addDisposable(viewModel.getInitialRam().subscribe(value -> refreshHeapFlagsPreview()));
+        refreshHeapFlagsPreview();
 
         // Jave Install Location
 
@@ -714,6 +783,16 @@ public class JavaSettingsTab extends AbstractSettingsTab {
         javaParamChecker.setText("");
         javaParamChecker.setIcon(null);
         javaParamChecker.setToolTipText(null);
+    }
+
+    // the launcher's own settings: no pack is known here, so the preview says it can change per instance
+    private void refreshHeapFlagsPreview() {
+        if (javaParameters == null) {
+            return;
+        }
+
+        heapFlagsPreview.show(MCLauncher.previewHeapArguments(App.settings.maximumMemory, App.settings.initialMemory,
+            null, OS.getMaximumRam(), javaParameters.getText()), App.settings.maximumMemory);
     }
 
     private void setJavaParamCheckState(CheckState state) {

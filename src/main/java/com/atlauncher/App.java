@@ -886,8 +886,12 @@ public class App {
                 LogManager.logStackTrace("Error loading settings, using defaults", t, false);
                 settings = new Settings();
             }
-        } else {
+        } else if (Files.exists(FileSystem.LAUNCHER_CONFIG)) {
+            // an old install, converted below: its memory keeps meaning what it did
             settings = new Settings();
+        } else {
+            // a genuinely new install
+            settings = Settings.forNewInstall(OS.getDetectedSystemRam(), OS.is64Bit());
         }
 
         if (Files.exists(FileSystem.LAUNCHER_CONFIG)) {

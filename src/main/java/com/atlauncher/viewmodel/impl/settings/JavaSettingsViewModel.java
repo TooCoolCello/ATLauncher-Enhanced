@@ -285,6 +285,14 @@ public class JavaSettingsViewModel implements SettingsListener {
         SettingsManager.post();
     }
 
+    /**
+     * Whether the Java settings keep the minimum and maximum memory together, as the user last chose.
+     */
+    public void setMemoryLinked(boolean linked) {
+        App.settings.memoryLinked = linked;
+        SettingsManager.post();
+    }
+
     public Observable<Integer> getInitialRam() {
         return _initialRam.observeOn(SwingSchedulers.edt());
     }

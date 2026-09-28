@@ -22,8 +22,10 @@ import java.util.Arrays;
 import java.util.List;
 
 import javax.annotation.Nullable;
+import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JPanel;
+import javax.swing.JScrollPane;
 import javax.swing.JTabbedPane;
 
 import org.mini2Dx.gettext.GetText;
@@ -128,8 +130,13 @@ public class SettingsTab extends HierarchyPanel implements Tab {
                         this.networkSettingsTab, this.loggingSettingsTab, this.backupsSettingsTab,
                         this.commandSettingsTab, this.environmentVariablesTab });
 
+        // Java scrolls rather than squeezing its fields when it's taller than the window
+        JScrollPane javaScrollPane = new JScrollPane(javaSettingsTab);
+        javaScrollPane.setBorder(BorderFactory.createEmptyBorder());
+        javaScrollPane.getVerticalScrollBar().setUnitIncrement(16);
+
         for (Tab tab : this.tabs) {
-            this.tabbedPane.addTab(tab.getTitle(), (JPanel) tab);
+            this.tabbedPane.addTab(tab.getTitle(), tab == javaSettingsTab ? javaScrollPane : (JPanel) tab);
         }
         tabbedPane.setOpaque(true);
         tabbedPane.setSelectedIndex(selectedTabIndex);
@@ -146,7 +153,7 @@ public class SettingsTab extends HierarchyPanel implements Tab {
         tabbedPane.addChangeListener(e -> {
             selectedTabIndex = tabbedPane.getSelectedIndex();
             Analytics.sendScreenView(
-                    ((Tab) tabbedPane.getSelectedComponent()).getAnalyticsScreenViewName() + " Settings");
+                    tabs.get(tabbedPane.getSelectedIndex()).getAnalyticsScreenViewName() + " Settings");
         });
     }
 

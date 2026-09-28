@@ -110,8 +110,13 @@ public class Settings {
 
     // Java/Minecraft
     public int maximumMemory = 4096;
-    // the initial heap (-Xms) in MB; 0 leaves it to Java, as before this setting existed
+    // the initial heap (-Xms) in MB; 0 leaves it to Java, as before this setting existed. A new install starts with
+    // both linked (see forNewInstall), but these defaults stay as they were, so a settings file saved without them
+    // still means what it did
     public int initialMemory = 0;
+    // whether the Java settings keep the minimum and maximum memory together; null (settings saved before it existed)
+    // is unlinked, even when they're equal
+    public Boolean memoryLinked;
     public int metaspace = (OS.is64Bit() ? 256 : 128);
     public int windowWidth = 854;
     public int windowHeight = 480;
@@ -457,25 +462,62 @@ public class Settings {
     }
 
     private void validateMemory() {
-        boolean needToSave = false;
-        int systemMemory = OS.getMaximumRam();
+        int usableRam = OS.getMaximumRam();
+        int valid = validatedMaximumMemory(maximumMemory, usableRam, OS.is64Bit());
 
-        if (systemMemory != 0 && maximumMemory > systemMemory) {
-            LogManager.warn("Tried to allocate " + maximumMemory + "MB of maximum memory but only " + systemMemory
-                + "MB is available to use!");
-
-            if (OS.is64Bit()) {
-                maximumMemory = Math.min((systemMemory / 1000) * 512, 8192);
-                needToSave = true;
-            } else {
-                maximumMemory = 1024;
-                needToSave = true;
-            }
-        }
-
-        if (needToSave) {
+        if (valid != maximumMemory) {
+            LogManager.warn("Tried to allocate " + maximumMemory + "MB of maximum memory but a 32 bit system can "
+                + "only use " + valid + "MB!");
+            maximumMemory = valid;
             save();
+        } else if (usableRam != 0 && maximumMemory > usableRam) {
+            LogManager.warn("Maximum memory of " + maximumMemory + "MB is more than the " + usableRam
+                + "MB detected, but it's kept as saved");
         }
+    }
+
+    /**
+     * The maximum memory to keep when settings load. A value above this machine's RAM is kept as saved: it may come
+     * from a machine with more, detection may be wrong, and the Java settings warn about it instead. Only a 32 bit
+     * system, which can't use more than 1024MB, still has it lowered, as it always has.
+     *
+     * @param usableRam as {@link OS#getMaximumRam()} reports it, 0 when unknown
+     */
+    static int validatedMaximumMemory(int saved, int usableRam, boolean is64Bit) {
+        if (!is64Bit && usableRam != 0 && saved > usableRam) {
+            return 1024;
+        }
+
+        return saved;
+    }
+
+    /**
+     * The settings for a genuinely new install, with no settings file of any kind to keep: the minimum and maximum
+     * memory linked, at {@link #newInstallMemory}.
+     *
+     * @param detectedRam this machine's RAM in MB, as actually detected, or null when it couldn't be
+     */
+    public static Settings forNewInstall(Integer detectedRam, boolean is64Bit) {
+        Settings settings = new Settings();
+        settings.maximumMemory = newInstallMemory(detectedRam, is64Bit);
+        settings.initialMemory = settings.maximumMemory;
+        settings.memoryLinked = true;
+        return settings;
+    }
+
+    /**
+     * The memory a new install starts with: 4096 MB, or on a machine with less than 8 GiB, half what Java can use
+     * there in 512 MB steps (at least 512 MB), leaving the rest to the system. A 32 bit Java can use at most 1024 MB.
+     * Unknown RAM keeps the usual 4096 MB, as there's nothing to go on.
+     */
+    static int newInstallMemory(Integer detectedRam, boolean is64Bit) {
+        Integer usable = is64Bit ? detectedRam : Integer.valueOf(Math.min(detectedRam == null ? 1024 : detectedRam,
+            1024));
+        if (usable == null || usable <= 0) {
+            return 4096;
+        }
+
+        return Math.max(512, Math.min(4096, usable / 2 / 512 * 512));
     }
 
     /**

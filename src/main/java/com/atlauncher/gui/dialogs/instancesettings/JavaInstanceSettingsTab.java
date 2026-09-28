@@ -38,12 +38,13 @@ import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JSpinner;
-import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingUtilities;
 import javax.swing.border.Border;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import javax.swing.text.AbstractDocument;
 import javax.swing.text.AttributeSet;
 import javax.swing.text.BadLocationException;
@@ -58,8 +59,12 @@ import com.atlauncher.constants.UIConstants;
 import com.atlauncher.data.Instance;
 import com.atlauncher.data.Settings;
 import com.atlauncher.data.minecraft.JavaRuntime;
+import com.atlauncher.gui.components.HeapFlagsPreview;
 import com.atlauncher.gui.components.JLabelWithHover;
+import com.atlauncher.gui.components.JavaParametersEditor;
+import com.atlauncher.gui.components.MemoryRangeSlider;
 import com.atlauncher.managers.DialogManager;
+import com.atlauncher.mclauncher.MCLauncher;
 import com.atlauncher.utils.ComboItem;
 import com.atlauncher.utils.Java;
 import com.atlauncher.utils.OS;
@@ -74,7 +79,10 @@ public class JavaInstanceSettingsTab extends JPanel {
     private JSpinner initialMemory;
     private JSpinner permGen;
     private JTextField javaPath;
-    private JTextArea javaParameters;
+    private JavaParametersEditor javaParameters;
+    private HeapFlagsPreview heapFlagsPreview;
+    // null when this machine's RAM isn't known
+    private MemoryRangeSlider memorySlider;
     private JComboBox<ComboItem<String>> javaRuntimeOverride;
     private JComboBox<ComboItem<Boolean>> useJavaProvidedByMinecraft;
     private JComboBox<ComboItem<Boolean>> disableLegacyLaunching;
@@ -149,6 +157,40 @@ public class JavaInstanceSettingsTab extends JPanel {
         initialMemory = new JSpinner(initialMemoryModel);
         ((JSpinner.DefaultEditor) initialMemory.getEditor()).getTextField().setColumns(5);
         add(initialMemory, gbc);
+
+        // both on one slider when this machine's RAM is known. It shows their values and takes exact ones, so the
+        // spinners above, which still hold the settings, aren't shown
+        memorySlider = MemoryRangeSlider.forSpinners(initialMemory, maximumMemory,
+            OS.getDetectedSystemRam());
+        if (memorySlider != null) {
+            // as last chosen for this instance, else the launcher's; unlinked when neither was saved
+            memorySlider.showLinked(Optional.ofNullable(instance.launcher.memoryLinked)
+                .orElse(Boolean.TRUE.equals(App.settings.memoryLinked)));
+            memorySlider.addLinkListener(linked -> refreshHeapFlagsPreview());
+
+            maximumMemoryPanel.setVisible(false);
+            maximumMemory.setVisible(false);
+            initialMemoryLabel.setVisible(false);
+            initialMemory.setVisible(false);
+
+            gbc.gridx = 0;
+            gbc.gridy++;
+            gbc.insets = UIConstants.LABEL_INSETS;
+            gbc.anchor = GridBagConstraints.FIRST_LINE_END;
+            JPanel memoryPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+            memoryPanel.add(new JLabelWithHover(GetText.tr("Memory/Ram") + ":", HELP_ICON,
+                "<html>" + Utils.splitMultilinedString(GetText.tr("The memory/ram Minecraft starts with (minimum, "
+                    + "-Xms) and can use (maximum, -Xmx). Drag the slider, or click either value to type it exactly "
+                    + "in MB. At Auto, Java decides the minimum."), 80, "<br/>") + "</html>"));
+            add(memoryPanel, gbc);
+
+            gbc.gridx++;
+            gbc.insets = UIConstants.FIELD_INSETS;
+            gbc.anchor = GridBagConstraints.FIRST_LINE_START;
+            gbc.fill = GridBagConstraints.HORIZONTAL;
+            add(memorySlider, gbc);
+            gbc.fill = GridBagConstraints.NONE;
+        }
 
         // Perm Gen Settings
         gbc.gridx = 0;
@@ -329,7 +371,8 @@ public class JavaInstanceSettingsTab extends JPanel {
         javaParametersScrollPane.setBorder(new FlatScrollPaneBorder());
         javaParametersScrollPane.setMaximumSize(new Dimension(1000, 200));
 
-        javaParameters = new JTextArea(6, 40);
+        javaParameters = new JavaParametersEditor();
+        heapFlagsPreview = new HeapFlagsPreview(javaParameters);
         ((AbstractDocument) javaParameters.getDocument()).setDocumentFilter(
             new DocumentFilter() {
                 @Override
@@ -345,8 +388,6 @@ public class JavaInstanceSettingsTab extends JPanel {
                 }
             });
         javaParameters.setText(getIfNotNull(this.instance.launcher.javaArguments, App.settings.javaParameters));
-        javaParameters.setLineWrap(true);
-        javaParameters.setWrapStyleWord(true);
         JButton javaParametersResetButton = new JButton(GetText.tr("Reset"));
         javaParametersResetButton.addActionListener(e -> javaParameters.setText(App.settings.javaParameters));
 
@@ -361,6 +402,32 @@ public class JavaInstanceSettingsTab extends JPanel {
         javaParametersPanel.add(paramsResetBox);
 
         add(javaParametersPanel, gbc);
+
+        // the heap flags this instance's memory settings add, greyed out and kept out of the Java parameters above
+        gbc.gridy++;
+        gbc.insets = UIConstants.FIELD_INSETS;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        add(heapFlagsPreview, gbc);
+        gbc.fill = GridBagConstraints.NONE;
+        maximumMemory.addChangeListener(e -> refreshHeapFlagsPreview());
+        initialMemory.addChangeListener(e -> refreshHeapFlagsPreview());
+        javaParameters.getDocument().addDocumentListener(new DocumentListener() {
+            @Override
+            public void insertUpdate(DocumentEvent e) {
+                refreshHeapFlagsPreview();
+            }
+
+            @Override
+            public void removeUpdate(DocumentEvent e) {
+                refreshHeapFlagsPreview();
+            }
+
+            @Override
+            public void changedUpdate(DocumentEvent e) {
+                refreshHeapFlagsPreview();
+            }
+        });
+        refreshHeapFlagsPreview();
 
         // Runtime Override
 
@@ -573,6 +640,27 @@ public class JavaInstanceSettingsTab extends JPanel {
         add(useSystemOpenAl, gbc);
     }
 
+    /**
+     * The flags as this instance would launch with the values shown: the spinners and Java parameters already hold
+     * the inherited launcher settings where the instance has none of its own, and its pack's required memory is known.
+     */
+    private void refreshHeapFlagsPreview() {
+        int maximum = (Integer) maximumMemory.getValue();
+
+        MCLauncher.HeapPreview preview = MCLauncher.previewHeapArguments(maximum, (Integer) initialMemory.getValue(),
+            Optional.ofNullable(instance.launcher.requiredMemory).orElse(0), OS.getMaximumRam(),
+            javaParameters.getText());
+        boolean linked = memorySlider != null && memorySlider.isLinked();
+        heapFlagsPreview.show(preview, maximum, linked);
+
+        // linked keeps the settings together, but a pack raising -Xmx at launch doesn't raise -Xms with it
+        if (memorySlider != null) {
+            memorySlider.setLinkNote(HeapFlagsPreview.linkedMinimumStays(preview)
+                ? GetText.tr("At launch, this pack raises only -Xmx, so they aren't the same then.")
+                : null);
+        }
+    }
+
     private Integer getIfNotNull(Integer value, Integer defaultValue) {
         if (value != null) {
             return value;
@@ -647,6 +735,15 @@ public class JavaInstanceSettingsTab extends JPanel {
 
         this.instance.launcher.maximumMemory = (maximumMemory == App.settings.maximumMemory ? null : maximumMemory);
         this.instance.launcher.initialMemory = (initialMemory == App.settings.initialMemory ? null : initialMemory);
+        // the link, when there's one to show: kept with the instance's own memory, else only when it isn't the
+        // launcher's, so an instance that changes nothing keeps inheriting everything
+        if (memorySlider != null) {
+            boolean ownMemory = this.instance.launcher.maximumMemory != null
+                || this.instance.launcher.initialMemory != null;
+            boolean linked = memorySlider.isLinked();
+            this.instance.launcher.memoryLinked = (ownMemory
+                || linked != Boolean.TRUE.equals(App.settings.memoryLinked)) ? Boolean.valueOf(linked) : null;
+        }
         this.instance.launcher.permGen = (permGen == App.settings.metaspace ? null : permGen);
 
         boolean instanceWillUseMinecraftProvidedJava = Optional.ofNullable(useJavaProvidedByMinecraftVal)

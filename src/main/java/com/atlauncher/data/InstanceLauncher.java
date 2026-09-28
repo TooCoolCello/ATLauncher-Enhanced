@@ -64,6 +64,8 @@ public class InstanceLauncher {
     public Integer maximumMemory;
     // the initial heap (-Xms) in MB; null uses the launcher's setting, 0 leaves it to Java
     public Integer initialMemory;
+    // whether its Java settings keep the minimum and maximum memory together; null uses the launcher's
+    public Boolean memoryLinked;
     public Integer permGen;
     public String javaPath;
     public String javaArguments;
