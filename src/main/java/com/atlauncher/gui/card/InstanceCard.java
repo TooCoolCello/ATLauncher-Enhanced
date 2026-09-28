@@ -35,6 +35,7 @@ import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.JTextArea;
+import javax.swing.SwingUtilities;
 
 import org.mini2Dx.gettext.GetText;
 
@@ -52,12 +53,14 @@ import com.atlauncher.gui.dialogs.EditModsDialog;
 import com.atlauncher.gui.dialogs.InstanceExportDialog;
 import com.atlauncher.gui.dialogs.InstanceSettingsDialog;
 import com.atlauncher.gui.dialogs.ProgressDialog;
+import com.atlauncher.gui.dialogs.WorldConfigDefaultsDialogs;
 import com.atlauncher.managers.AccountManager;
 import com.atlauncher.managers.ConfigManager;
 import com.atlauncher.managers.DialogManager;
 import com.atlauncher.managers.InstanceManager;
 import com.atlauncher.network.Analytics;
 import com.atlauncher.network.analytics.AnalyticsEvent;
+import com.atlauncher.utils.DefaultConfigsFromWorld;
 import com.atlauncher.utils.OS;
 
 /**
@@ -119,6 +122,8 @@ public class InstanceCard extends CollapsiblePanel {
     private final JMenuItem renameMenuItem = new JMenuItem(GetText.tr("Rename"));
     private final JMenuItem changeDescriptionMenuItem = new JMenuItem(GetText.tr("Change Description"));
     private final JMenuItem changeImageMenuItem = new JMenuItem(GetText.tr("Change Image"));
+    private final JMenuItem manageWorldConfigDefaultsMenuItem = new JMenuItem(
+            GetText.tr("Manage World Config Defaults..."));
     // #. {0} is the loader (Forge/Fabric/Quilt)
     private final JMenuItem addFabricMenuItem = new JMenuItem(GetText.tr("Add {0}", "Fabric"));
     // #. {0} is the loader (Forge/Fabric/Quilt)
@@ -331,6 +336,7 @@ public class InstanceCard extends CollapsiblePanel {
         editInstancePopupMenu.add(renameMenuItem);
         editInstancePopupMenu.add(changeDescriptionMenuItem);
         editInstancePopupMenu.add(changeImageMenuItem);
+        editInstancePopupMenu.add(manageWorldConfigDefaultsMenuItem);
         editInstancePopupMenu.addSeparator();
 
         if (ConfigManager.getConfigItem("loaders.fabric.enabled", true)
@@ -388,6 +394,10 @@ public class InstanceCard extends CollapsiblePanel {
             instance.startChangeImage();
             image.setImage(instance.getImage().getImage());
         });
+        manageWorldConfigDefaultsMenuItem.setToolTipText(GetText.tr("Copy server configs from one of this "
+                + "instance's worlds to its defaultconfigs folder, so new worlds start with them."));
+        manageWorldConfigDefaultsMenuItem.addActionListener(
+                e -> WorldConfigDefaultsDialogs.start(SwingUtilities.getWindowAncestor(this), instance));
 
         // loader things
         addFabricMenuItem.addActionListener(e -> {
@@ -456,6 +466,8 @@ public class InstanceCard extends CollapsiblePanel {
 
     private void setEditInstanceMenuItemVisbility() {
         reinstallMenuItem.setVisible(instance.isUpdatable());
+        // only where the loader copies defaultconfigs into each new world's serverconfig
+        manageWorldConfigDefaultsMenuItem.setVisible(DefaultConfigsFromWorld.isSupported(instance));
 
         addFabricMenuItem.setVisible(instance.launcher.loaderVersion == null);
         addForgeMenuItem.setVisible(instance.launcher.loaderVersion == null);
