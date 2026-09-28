@@ -23,6 +23,8 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -46,7 +48,8 @@ import com.atlauncher.managers.LogManager;
  * copied from is only read.
  *
  * <p>
- * The user chooses the world and exactly which of its files to copy; nothing is matched or filtered by mod.
+ * The user chooses the world and exactly which of its files to copy; nothing is matched or filtered by mod. The
+ * files already in defaultconfigs can be listed, and one at a time replaced from a world or removed.
  */
 public final class DefaultConfigsFromWorld {
     static final String SAVES = "saves";
@@ -58,7 +61,9 @@ public final class DefaultConfigsFromWorld {
     private static final Pattern RELEASE = Pattern.compile("\\d+\\.\\d+(\\.\\d+)?");
 
     public enum Outcome {
-        NO_WORLDS, NO_SERVER_CONFIG, NO_FILES, CANCELLED, UNSAFE, FAILED, COPIED
+        NO_WORLDS, NO_SERVER_CONFIG, NO_FILES, CANCELLED, UNSAFE, FAILED, COPIED, REPLACED, REMOVED,
+        // the default config changed or went since it was listed, so nothing was done
+        STALE
     }
 
     /**
@@ -83,6 +88,37 @@ public final class DefaultConfigsFromWorld {
         Decision confirm(List<Copy> copies);
 
         void tell(String message);
+
+        // for replacing a default config: one of these files, preferring the one at the same path, or null
+        String chooseReplacement(Path world, List<String> files, String preferred);
+
+        // replacing the default config at target with source
+        boolean confirmReplace(Path source, Path target);
+
+        // removing the default config at path; recycle is whether it goes to the recycle bin/trash where there's one
+        boolean confirmRemove(String relative, Path path, boolean recycle);
+    }
+
+    /**
+     * A file in defaultconfigs as it was listed. It's only acted on while it's still that file: the same regular file,
+     * the same size, modified at the same time.
+     */
+    public static final class DefaultConfig {
+        // relative to defaultconfigs, with / separators
+        public final String relative;
+        final long size;
+        final FileTime modified;
+
+        DefaultConfig(String relative, long size, FileTime modified) {
+            this.relative = relative;
+            this.size = size;
+            this.modified = modified;
+        }
+
+        @Override
+        public String toString() {
+            return relative;
+        }
     }
 
     /**
@@ -145,8 +181,9 @@ public final class DefaultConfigsFromWorld {
     }
 
     /**
-     * The regular files in a world's serverconfig folder, including those in folders inside it, relative to it with /
-     * separators, sorted. Links out of it are left out, and linked folders aren't followed.
+     * The regular files in a world's serverconfig folder that can be copied, including those in folders inside it,
+     * relative to it with / separators, sorted. Links out of it are left out, linked folders aren't followed, and
+     * readme.txt files, in any case, aren't offered: they're notes, not configs.
      */
     public static List<String> serverConfigFiles(Path world) throws IOException {
         Path serverConfig = world.resolve(SERVER_CONFIG);
@@ -156,10 +193,15 @@ public final class DefaultConfigsFromWorld {
 
         Path realServerConfig = serverConfig.toRealPath();
         try (Stream<Path> files = Files.walk(serverConfig, MAX_DEPTH)) {
-            return files.filter(Files::isRegularFile).filter(file -> isInside(file, realServerConfig))
+            return files.filter(Files::isRegularFile).filter(file -> !isReadme(file))
+                .filter(file -> isInside(file, realServerConfig))
                 .map(file -> serverConfig.relativize(file).toString().replace('\\', '/')).sorted()
                 .collect(Collectors.toList());
         }
+    }
+
+    static boolean isReadme(Path file) {
+        return file.getFileName().toString().equalsIgnoreCase("readme.txt");
     }
 
     /**
@@ -269,6 +311,57 @@ public final class DefaultConfigsFromWorld {
     }
 
     /**
+     * The regular files in the instance's defaultconfigs folder, including those in folders inside it, by their path
+     * relative to it. Links aren't listed, and nothing a folder link leads to outside it is.
+     *
+     * @throws IllegalArgumentException when defaultconfigs itself leads out of the instance
+     */
+    public static List<DefaultConfig> defaultConfigs(Path instanceRoot) throws IOException {
+        Path defaultConfigs = instanceRoot.resolve(DEFAULT_CONFIGS);
+        if (!Files.isDirectory(defaultConfigs)) {
+            return Collections.emptyList();
+        }
+        if (Files.isSymbolicLink(defaultConfigs) || !isInside(defaultConfigs, instanceRoot.toRealPath())) {
+            throw new IllegalArgumentException(defaultConfigs + " isn't inside the instance");
+        }
+
+        Path realDefaultConfigs = defaultConfigs.toRealPath();
+        List<DefaultConfig> configs = new ArrayList<>();
+        try (Stream<Path> files = Files.walk(defaultConfigs, MAX_DEPTH)) {
+            for (Path file : (Iterable<Path>) files::iterator) {
+                if (Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS) && isInside(file, realDefaultConfigs)) {
+                    BasicFileAttributes attributes = Files.readAttributes(file, BasicFileAttributes.class,
+                        LinkOption.NOFOLLOW_LINKS);
+                    configs.add(new DefaultConfig(defaultConfigs.relativize(file).toString().replace('\\', '/'),
+                        attributes.size(), attributes.lastModifiedTime()));
+                }
+            }
+        }
+        configs.sort(Comparator.comparing(config -> config.relative));
+        return configs;
+    }
+
+    /**
+     * Where a listed default config is, while it's still exactly what was listed and safely inside defaultconfigs.
+     *
+     * @throws IllegalStateException when it's gone or changed
+     * @throws IllegalArgumentException when it isn't safely inside defaultconfigs
+     */
+    public static Path current(Path instanceRoot, DefaultConfig listed) throws IOException {
+        Path path = destination(instanceRoot, listed.relative);
+        if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IllegalStateException(listed.relative + " is gone");
+        }
+
+        BasicFileAttributes attributes = Files.readAttributes(path, BasicFileAttributes.class,
+            LinkOption.NOFOLLOW_LINKS);
+        if (attributes.size() != listed.size || !attributes.lastModifiedTime().equals(listed.modified)) {
+            throw new IllegalStateException(listed.relative + " changed");
+        }
+        return path;
+    }
+
+    /**
      * Copies the source, which is only read, to the destination. An existing destination is only replaced when
      * replace is true; otherwise it fails with {@link FileAlreadyExistsException}.
      */
@@ -280,6 +373,113 @@ public final class DefaultConfigsFromWorld {
         } else {
             Files.copy(source, destination);
         }
+    }
+
+    /**
+     * Replaces one listed default config with a file chosen from a world's serverconfig: the file at the same path
+     * when the user keeps it chosen, or any other the user chooses instead. Nothing is written unless the user
+     * confirms that exact source and target, and it's still the file that was listed.
+     */
+    public static Outcome replaceFromWorld(Path instanceRoot, DefaultConfig target, Choices choices) {
+        try {
+            current(instanceRoot, target);
+
+            List<Path> worlds = worlds(instanceRoot);
+            if (worlds.isEmpty()) {
+                choices.tell(GetText.tr("This instance has no worlds yet, so there's no config to replace it with. "
+                    + "Nothing was changed."));
+                return Outcome.NO_WORLDS;
+            }
+
+            Path world = choices.chooseWorld(worlds);
+            if (world == null || !worlds.contains(world)) {
+                return Outcome.CANCELLED;
+            }
+
+            String worldName = world.getFileName().toString();
+            if (!Files.isDirectory(world.resolve(SERVER_CONFIG))) {
+                choices.tell(GetText.tr("The world {0} has no serverconfig folder, so there's no config to replace "
+                    + "it with. Nothing was changed.", worldName));
+                return Outcome.NO_SERVER_CONFIG;
+            }
+
+            List<String> files = serverConfigFiles(world);
+            if (files.isEmpty()) {
+                choices.tell(GetText.tr("The serverconfig folder of {0} has no config files to copy (readme.txt "
+                    + "files aren't offered). Nothing was changed.", worldName));
+                return Outcome.NO_FILES;
+            }
+
+            String chosen = choices.chooseReplacement(world, files, target.relative);
+            if (chosen == null || !files.contains(chosen)) {
+                return Outcome.CANCELLED;
+            }
+
+            Path source = source(world, chosen);
+            Path destination = current(instanceRoot, target);
+            if (!choices.confirmReplace(source, destination)) {
+                return Outcome.CANCELLED;
+            }
+
+            // still the file that was confirmed
+            current(instanceRoot, target);
+            copy(source, destination, true);
+            choices.tell(GetText.tr("Replaced {0} in defaultconfigs. New worlds created in this instance will start "
+                + "with it; existing worlds keep their own.", target.relative));
+            return Outcome.REPLACED;
+        } catch (IllegalStateException e) {
+            return stale(choices, target, e);
+        } catch (IllegalArgumentException e) {
+            return unsafe(choices, e);
+        } catch (IOException e) {
+            LogManager.logStackTrace("Failed to replace a default config", e);
+            choices.tell(GetText.tr("{0} couldn't be replaced: {1}.", target.relative, e.toString()));
+            return Outcome.FAILED;
+        }
+    }
+
+    /**
+     * Removes one listed default config, and nothing else, once the user confirms it and while it's still the file
+     * that was listed.
+     *
+     * @param recycle whether to move it to the recycle bin/trash where the system has one, as the launcher's setting
+     *                says; otherwise, or when there's none, it's deleted permanently
+     */
+    public static Outcome remove(Path instanceRoot, DefaultConfig target, boolean recycle, Choices choices) {
+        try {
+            Path path = current(instanceRoot, target);
+            if (!choices.confirmRemove(target.relative, path, recycle)) {
+                return Outcome.CANCELLED;
+            }
+
+            path = current(instanceRoot, target);
+            if (!FileUtils.delete(path, recycle)) {
+                throw new IOException(path + " couldn't be removed");
+            }
+            return Outcome.REMOVED;
+        } catch (IllegalStateException e) {
+            return stale(choices, target, e);
+        } catch (IllegalArgumentException e) {
+            return unsafe(choices, e);
+        } catch (IOException e) {
+            LogManager.logStackTrace("Failed to remove a default config", e);
+            choices.tell(GetText.tr("{0} couldn't be removed: {1}.", target.relative, e.toString()));
+            return Outcome.FAILED;
+        }
+    }
+
+    private static Outcome stale(Choices choices, DefaultConfig target, IllegalStateException e) {
+        LogManager.warn("Not acting on a default config: " + e.getMessage());
+        choices.tell(GetText.tr("{0} was changed or removed since it was listed, so nothing was done. The list will "
+            + "be refreshed.", target.relative));
+        return Outcome.STALE;
+    }
+
+    private static Outcome unsafe(Choices choices, IllegalArgumentException e) {
+        LogManager.warn("Not acting on a default config: " + e.getMessage());
+        choices.tell(GetText.tr("That file isn't safely inside the world's serverconfig folder or the instance's "
+            + "defaultconfigs folder, so nothing was done."));
+        return Outcome.UNSAFE;
     }
 
     /**
@@ -311,8 +511,8 @@ public final class DefaultConfigsFromWorld {
 
             List<String> files = serverConfigFiles(world);
             if (files.isEmpty()) {
-                choices.tell(GetText.tr("The serverconfig folder of {0} has no config files. Nothing was changed.",
-                    worldName));
+                choices.tell(GetText.tr("The serverconfig folder of {0} has no config files to copy (readme.txt "
+                    + "files aren't offered). Nothing was changed.", worldName));
                 return Outcome.NO_FILES;
             }
 

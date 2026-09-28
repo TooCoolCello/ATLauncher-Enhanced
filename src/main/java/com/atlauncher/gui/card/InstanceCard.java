@@ -52,8 +52,8 @@ import com.atlauncher.gui.dialogs.AddModsDialog;
 import com.atlauncher.gui.dialogs.EditModsDialog;
 import com.atlauncher.gui.dialogs.InstanceExportDialog;
 import com.atlauncher.gui.dialogs.InstanceSettingsDialog;
+import com.atlauncher.gui.dialogs.ManageWorldConfigDefaultsDialog;
 import com.atlauncher.gui.dialogs.ProgressDialog;
-import com.atlauncher.gui.dialogs.WorldConfigDefaultsDialogs;
 import com.atlauncher.managers.AccountManager;
 import com.atlauncher.managers.ConfigManager;
 import com.atlauncher.managers.DialogManager;
@@ -394,10 +394,10 @@ public class InstanceCard extends CollapsiblePanel {
             instance.startChangeImage();
             image.setImage(instance.getImage().getImage());
         });
-        manageWorldConfigDefaultsMenuItem.setToolTipText(GetText.tr("Copy server configs from one of this "
-                + "instance's worlds to its defaultconfigs folder, so new worlds start with them."));
+        manageWorldConfigDefaultsMenuItem.setToolTipText(GetText.tr("See and manage the server configs new worlds "
+                + "in this instance start with, and copy more from its worlds."));
         manageWorldConfigDefaultsMenuItem.addActionListener(
-                e -> WorldConfigDefaultsDialogs.start(SwingUtilities.getWindowAncestor(this), instance));
+                e -> ManageWorldConfigDefaultsDialog.open(SwingUtilities.getWindowAncestor(this), instance));
 
         // loader things
         addFabricMenuItem.addActionListener(e -> {

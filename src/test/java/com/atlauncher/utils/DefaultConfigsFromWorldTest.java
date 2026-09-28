@@ -49,6 +49,7 @@ import com.atlauncher.data.minecraft.MinecraftVersion;
 import com.atlauncher.data.minecraft.loaders.LoaderVersion;
 import com.atlauncher.utils.DefaultConfigsFromWorld.Copy;
 import com.atlauncher.utils.DefaultConfigsFromWorld.Decision;
+import com.atlauncher.utils.DefaultConfigsFromWorld.DefaultConfig;
 import com.atlauncher.utils.DefaultConfigsFromWorld.Outcome;
 
 /**
@@ -101,6 +102,44 @@ public class DefaultConfigsFromWorldTest {
         @Override
         public void tell(String message) {
             told.add(message);
+        }
+
+        // replacing and removing
+        String replacement;
+        String preferred;
+        boolean confirmReplace = true;
+        Path replaceSource;
+        Path replaceTarget;
+        boolean confirmRemove = true;
+        String removeRelative;
+        Path removePath;
+        Boolean removeRecycle;
+        // done while asked to confirm, as if the file changed then
+        Runnable whileConfirming = () -> {
+        };
+
+        @Override
+        public String chooseReplacement(Path world, List<String> files, String preferred) {
+            filesOffered = files;
+            this.preferred = preferred;
+            return replacement;
+        }
+
+        @Override
+        public boolean confirmReplace(Path source, Path target) {
+            replaceSource = source;
+            replaceTarget = target;
+            whileConfirming.run();
+            return confirmReplace;
+        }
+
+        @Override
+        public boolean confirmRemove(String relative, Path path, boolean recycle) {
+            removeRelative = relative;
+            removePath = path;
+            removeRecycle = recycle;
+            whileConfirming.run();
+            return confirmRemove;
         }
     }
 
@@ -497,5 +536,342 @@ public class DefaultConfigsFromWorldTest {
         assertThrows(IllegalArgumentException.class,
             () -> DefaultConfigsFromWorld.destination(root, "create-server.toml"));
         assertEquals("keep", read(outside));
+    }
+
+    // --- the current default configs
+
+    private List<String> listed() throws IOException {
+        return DefaultConfigsFromWorld.defaultConfigs(root).stream().map(config -> config.relative)
+            .collect(Collectors.toList());
+    }
+
+    private DefaultConfig listing(String relative) throws IOException {
+        return DefaultConfigsFromWorld.defaultConfigs(root).stream().filter(config -> config.relative.equals(relative))
+            .findFirst().orElseThrow(() -> new AssertionError(relative + " isn't listed"));
+    }
+
+    @Test
+    public void noDefaultConfigsListsNothing() throws IOException {
+        assertTrue(listed().isEmpty());
+        Files.createDirectories(root.resolve("defaultconfigs/empty/folder"));
+        assertTrue(listed().isEmpty());
+    }
+
+    @Test
+    public void everyDefaultConfigIsListedByItsRelativePath() throws IOException {
+        write(defaults("create-server.toml"), "a");
+        write(defaults("sub/deeper/tweaks.json"), "b");
+        write(defaults("alpha.toml"), "c");
+
+        assertEquals(Arrays.asList("alpha.toml", "create-server.toml", "sub/deeper/tweaks.json"), listed());
+        assertEquals("sub/deeper/tweaks.json", listing("sub/deeper/tweaks.json").toString());
+    }
+
+    @Test
+    public void theListFollowsCopiesReplacementsAndRemovals() throws IOException {
+        Path serverConfig = world("Survival").resolve("serverconfig");
+        write(serverConfig.resolve("create-server.toml"), "from the world, longer");
+        assertTrue(listed().isEmpty());
+
+        Answers answers = new Answers();
+        answers.world = "Survival";
+        answers.files = Collections.singletonList("create-server.toml");
+        assertEquals(Outcome.COPIED, run(answers));
+        assertEquals(Collections.singletonList("create-server.toml"), listed());
+
+        // replaced: listed again as what it is now
+        Path target = write(defaults("create-server.toml"), "edited");
+        DefaultConfig before = listing("create-server.toml");
+        answers.replacement = "create-server.toml";
+        assertEquals(Outcome.REPLACED, DefaultConfigsFromWorld.replaceFromWorld(root, before, answers));
+        assertEquals("from the world, longer", read(target));
+        DefaultConfig after = listing("create-server.toml");
+        assertEquals(Outcome.STALE, DefaultConfigsFromWorld.remove(root, before, false, answers));
+        assertTrue(Files.exists(target));
+
+        assertEquals(Outcome.REMOVED, DefaultConfigsFromWorld.remove(root, after, false, answers));
+        assertTrue(listed().isEmpty());
+    }
+
+    // --- replacing one
+
+    @Test
+    public void theSameRelativePathIsPreferredAndReplacedOnlyWhenConfirmed() throws IOException {
+        Path serverConfig = world("Survival").resolve("serverconfig");
+        Path source = write(serverConfig.resolve("sub/create-server.toml"), "world");
+        write(serverConfig.resolve("other-server.toml"), "other");
+        Path target = write(defaults("sub/create-server.toml"), "default");
+        FileTime modified = Files.getLastModifiedTime(source);
+
+        Answers answers = new Answers();
+        answers.world = "Survival";
+        answers.replacement = "sub/create-server.toml";
+        answers.confirmReplace = false;
+        assertEquals(Outcome.CANCELLED,
+            DefaultConfigsFromWorld.replaceFromWorld(root, listing("sub/create-server.toml"), answers));
+        assertEquals("sub/create-server.toml", answers.preferred);
+        assertEquals(Arrays.asList("other-server.toml", "sub/create-server.toml"), answers.filesOffered);
+        assertEquals(source, answers.replaceSource);
+        assertEquals(target, answers.replaceTarget);
+        assertEquals("default", read(target));
+
+        answers.confirmReplace = true;
+        assertEquals(Outcome.REPLACED,
+            DefaultConfigsFromWorld.replaceFromWorld(root, listing("sub/create-server.toml"), answers));
+        assertEquals("world", read(target));
+        assertEquals("world", read(source));
+        assertEquals(modified, Files.getLastModifiedTime(source));
+    }
+
+    @Test
+    public void anotherFileIsOnlyUsedWhenTheUserChoosesItAndGoesToTheSelectedTarget() throws IOException {
+        Path serverConfig = world("Survival").resolve("serverconfig");
+        write(serverConfig.resolve("renamed-server.toml"), "renamed");
+        Path target = write(defaults("create-server.toml"), "default");
+
+        // the world has no create-server.toml: nothing is chosen for the user
+        Answers answers = new Answers();
+        answers.world = "Survival";
+        assertEquals(Outcome.CANCELLED,
+            DefaultConfigsFromWorld.replaceFromWorld(root, listing("create-server.toml"), answers));
+        assertEquals("create-server.toml", answers.preferred);
+        assertNull(answers.replaceTarget, "never asked to confirm");
+        assertEquals("default", read(target));
+
+        // chosen explicitly, it replaces the selected target, and nothing else is created
+        answers.replacement = "renamed-server.toml";
+        assertEquals(Outcome.REPLACED,
+            DefaultConfigsFromWorld.replaceFromWorld(root, listing("create-server.toml"), answers));
+        assertEquals(target, answers.replaceTarget);
+        assertEquals("renamed", read(target));
+        assertEquals(Collections.singletonList("create-server.toml"), listed());
+
+        // and only a file that was offered
+        answers.replacement = "../level.dat";
+        assertEquals(Outcome.CANCELLED,
+            DefaultConfigsFromWorld.replaceFromWorld(root, listing("create-server.toml"), answers));
+        assertEquals("renamed", read(target));
+    }
+
+    @Test
+    public void replacingWithNoWorldsOrServerConfigSaysSo() throws IOException {
+        write(defaults("create-server.toml"), "default");
+        Answers answers = new Answers();
+        answers.world = "Survival";
+        answers.replacement = "create-server.toml";
+
+        assertEquals(Outcome.NO_WORLDS,
+            DefaultConfigsFromWorld.replaceFromWorld(root, listing("create-server.toml"), answers));
+        world("Survival");
+        assertEquals(Outcome.NO_SERVER_CONFIG,
+            DefaultConfigsFromWorld.replaceFromWorld(root, listing("create-server.toml"), answers));
+        Files.createDirectories(root.resolve("saves/Survival/serverconfig"));
+        assertEquals(Outcome.NO_FILES,
+            DefaultConfigsFromWorld.replaceFromWorld(root, listing("create-server.toml"), answers));
+        assertEquals("default", read(defaults("create-server.toml")));
+    }
+
+    // --- removing one
+
+    @Test
+    public void removingShowsExactlyWhatAndRemovesOnlyThatWhenConfirmed() throws IOException {
+        Path target = write(defaults("sub/create-server.toml"), "default");
+        Path sibling = write(defaults("sub/other-server.toml"), "other");
+
+        Answers answers = new Answers();
+        answers.confirmRemove = false;
+        assertEquals(Outcome.CANCELLED,
+            DefaultConfigsFromWorld.remove(root, listing("sub/create-server.toml"), false, answers));
+        assertEquals("sub/create-server.toml", answers.removeRelative);
+        assertEquals(target, answers.removePath);
+        assertFalse(answers.removeRecycle);
+        assertTrue(Files.exists(target));
+
+        answers.confirmRemove = true;
+        assertEquals(Outcome.REMOVED,
+            DefaultConfigsFromWorld.remove(root, listing("sub/create-server.toml"), false, answers));
+        assertFalse(Files.exists(target));
+        assertEquals("other", read(sibling));
+        assertEquals(Collections.singletonList("sub/other-server.toml"), listed());
+    }
+
+    // --- stale selections
+
+    @Test
+    public void aDefaultConfigChangedOrGoneSinceListingIsntActedOn() throws IOException {
+        write(world("Survival").resolve("serverconfig/create-server.toml"), "world");
+        Path target = write(defaults("create-server.toml"), "default");
+        DefaultConfig listed = listing("create-server.toml");
+        Answers answers = new Answers();
+        answers.world = "Survival";
+        answers.replacement = "create-server.toml";
+
+        // changed, even at the same size
+        write(target, "changed");
+        Files.setLastModifiedTime(target, FileTime.fromMillis(listed.modified.toMillis() + 5000));
+        assertEquals(Outcome.STALE, DefaultConfigsFromWorld.replaceFromWorld(root, listed, answers));
+        assertEquals(Outcome.STALE, DefaultConfigsFromWorld.remove(root, listed, false, answers));
+        assertThrows(IllegalStateException.class, () -> DefaultConfigsFromWorld.current(root, listed));
+        assertEquals("changed", read(target));
+        assertNull(answers.replaceTarget, "never asked to confirm");
+        assertNull(answers.removePath, "never asked to confirm");
+
+        // gone
+        DefaultConfig relisted = listing("create-server.toml");
+        Files.delete(target);
+        assertEquals(Outcome.STALE, DefaultConfigsFromWorld.replaceFromWorld(root, relisted, answers));
+        assertEquals(Outcome.STALE, DefaultConfigsFromWorld.remove(root, relisted, false, answers));
+        assertFalse(Files.exists(target));
+    }
+
+    @Test
+    public void aDefaultConfigChangedWhileConfirmingIsntOverwrittenOrRemoved() throws IOException {
+        write(world("Survival").resolve("serverconfig/create-server.toml"), "world");
+        Path target = write(defaults("create-server.toml"), "default");
+        Answers answers = new Answers();
+        answers.world = "Survival";
+        answers.replacement = "create-server.toml";
+        answers.whileConfirming = () -> {
+            try {
+                write(target, "edited meanwhile");
+            } catch (IOException e) {
+                throw new AssertionError(e);
+            }
+        };
+
+        assertEquals(Outcome.STALE,
+            DefaultConfigsFromWorld.replaceFromWorld(root, listing("create-server.toml"), answers));
+        assertEquals("edited meanwhile", read(target));
+
+        write(target, "default");
+        assertEquals(Outcome.STALE, DefaultConfigsFromWorld.remove(root, listing("create-server.toml"), false,
+            answers));
+        assertEquals("edited meanwhile", read(target));
+    }
+
+    // --- escapes
+
+    @Test
+    public void aDefaultConfigPathLeadingOutIsNeverActedOn() throws IOException {
+        Path outside = write(root.resolve("options.txt"), "keep");
+        DefaultConfig escaping = new DefaultConfig("../options.txt", Files.size(outside),
+            Files.getLastModifiedTime(outside));
+
+        Answers answers = new Answers();
+        assertEquals(Outcome.UNSAFE, DefaultConfigsFromWorld.remove(root, escaping, false, answers));
+        assertEquals(Outcome.UNSAFE, DefaultConfigsFromWorld.replaceFromWorld(root, escaping, answers));
+        assertThrows(IllegalArgumentException.class, () -> DefaultConfigsFromWorld.current(root, escaping));
+        assertNull(answers.removePath);
+        assertEquals("keep", read(outside));
+    }
+
+    @Test
+    public void aFileLinkInDefaultConfigsIsntListedOrActedOn() throws IOException {
+        Path outside = write(temp.resolve("elsewhere/secret-server.toml"), "secret");
+        write(defaults("create-server.toml"), "a");
+        assumeLinks(defaults("linked-server.toml"), outside);
+
+        assertEquals(Collections.singletonList("create-server.toml"), listed());
+        DefaultConfig linked = new DefaultConfig("linked-server.toml", Files.size(outside),
+            Files.getLastModifiedTime(outside));
+        assertEquals(Outcome.UNSAFE, DefaultConfigsFromWorld.remove(root, linked, false, new Answers()));
+        assertEquals("secret", read(outside));
+    }
+
+    @Test
+    public void aFolderLinkInDefaultConfigsLeadingOutIsntListedOrActedOn() throws IOException {
+        Path outside = write(temp.resolve("elsewhere/secret-server.toml"), "secret");
+        write(defaults("create-server.toml"), "a");
+        assumeLinks(defaults("linked"), outside.getParent());
+
+        assertEquals(Collections.singletonList("create-server.toml"), listed());
+        DefaultConfig linked = new DefaultConfig("linked/secret-server.toml", Files.size(outside),
+            Files.getLastModifiedTime(outside));
+        assertEquals(Outcome.UNSAFE, DefaultConfigsFromWorld.remove(root, linked, false, new Answers()));
+        assertEquals(Outcome.UNSAFE, DefaultConfigsFromWorld.replaceFromWorld(root, linked, new Answers()));
+        assertEquals("secret", read(outside));
+    }
+
+    @Test
+    public void defaultConfigsLeadingOutOfTheInstanceIsntListed() throws IOException {
+        Path outside = Files.createDirectories(temp.resolve("elsewhere"));
+        write(outside.resolve("secret-server.toml"), "secret");
+        assumeLinks(root.resolve("defaultconfigs"), outside);
+
+        assertThrows(IllegalArgumentException.class, () -> DefaultConfigsFromWorld.defaultConfigs(root));
+        assertEquals("secret", read(outside.resolve("secret-server.toml")));
+    }
+
+    // --- readme.txt files
+
+    @Test
+    public void readmeFilesAreNeverOfferedInAnyCaseOrFolder() throws IOException {
+        Path serverConfig = world("Survival").resolve("serverconfig");
+        write(serverConfig.resolve("readme.txt"), "notes");
+        write(serverConfig.resolve("sub/README.TXT"), "notes");
+        write(serverConfig.resolve("sub/deeper/ReadMe.Txt"), "notes");
+        write(serverConfig.resolve("create-server.toml"), "a");
+        write(serverConfig.resolve("notes.txt"), "b");
+        write(serverConfig.resolve("sub/readme.txt.bak"), "c");
+        write(serverConfig.resolve("sub/my-readme.txt"), "d");
+
+        assertEquals(Arrays.asList("create-server.toml", "notes.txt", "sub/my-readme.txt", "sub/readme.txt.bak"),
+            DefaultConfigsFromWorld.serverConfigFiles(root.resolve("saves/Survival")));
+
+        // left as they are
+        assertEquals("notes", read(serverConfig.resolve("readme.txt")));
+        assertEquals("notes", read(serverConfig.resolve("sub/README.TXT")));
+        assertEquals("notes", read(serverConfig.resolve("sub/deeper/ReadMe.Txt")));
+    }
+
+    @Test
+    public void readmeFilesArentOfferedToCopyOrReplaceWith() throws IOException {
+        Path serverConfig = world("Survival").resolve("serverconfig");
+        write(serverConfig.resolve("README.txt"), "notes");
+        write(serverConfig.resolve("create-server.toml"), "a");
+        write(defaults("create-server.toml"), "default");
+
+        Answers answers = new Answers();
+        answers.world = "Survival";
+        answers.files = Collections.singletonList("README.txt");
+        assertEquals(Outcome.UNSAFE, run(answers));
+        assertEquals(Collections.singletonList("create-server.toml"), answers.filesOffered);
+        assertFalse(Files.exists(defaults("README.txt")));
+
+        answers.replacement = "README.txt";
+        assertEquals(Outcome.CANCELLED,
+            DefaultConfigsFromWorld.replaceFromWorld(root, listing("create-server.toml"), answers));
+        assertEquals(Collections.singletonList("create-server.toml"), answers.filesOffered);
+        assertEquals("default", read(defaults("create-server.toml")));
+    }
+
+    @Test
+    public void aServerConfigWithOnlyReadmeFilesHasNothingToOffer() throws IOException {
+        Path serverConfig = world("Survival").resolve("serverconfig");
+        write(serverConfig.resolve("readme.txt"), "notes");
+        write(serverConfig.resolve("sub/README.TXT"), "notes");
+        write(defaults("create-server.toml"), "default");
+
+        Answers answers = new Answers();
+        answers.world = "Survival";
+        answers.files = Collections.singletonList("readme.txt");
+        assertEquals(Outcome.NO_FILES, run(answers));
+        assertNull(answers.filesOffered, "no empty checklist");
+        assertTrue(answers.told.get(0).contains("readme.txt"));
+
+        answers.replacement = "readme.txt";
+        assertEquals(Outcome.NO_FILES,
+            DefaultConfigsFromWorld.replaceFromWorld(root, listing("create-server.toml"), answers));
+        assertNull(answers.filesOffered);
+        assertEquals("notes", read(serverConfig.resolve("readme.txt")));
+        assertFalse(Files.exists(defaults("readme.txt")));
+    }
+
+    @Test
+    public void readmeFilesAlreadyInDefaultConfigsAreStillListed() throws IOException {
+        write(defaults("readme.txt"), "notes");
+        write(defaults("sub/README.TXT"), "notes");
+
+        assertEquals(Arrays.asList("readme.txt", "sub/README.TXT"), listed());
     }
 }

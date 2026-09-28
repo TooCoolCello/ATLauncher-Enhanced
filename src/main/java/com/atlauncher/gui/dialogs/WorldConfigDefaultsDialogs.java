@@ -41,7 +41,6 @@ import javax.swing.SwingUtilities;
 
 import org.mini2Dx.gettext.GetText;
 
-import com.atlauncher.data.Instance;
 import com.atlauncher.managers.DialogManager;
 import com.atlauncher.managers.LogManager;
 import com.atlauncher.utils.DefaultConfigsFromWorld;
@@ -49,21 +48,15 @@ import com.atlauncher.utils.DefaultConfigsFromWorld.Copy;
 import com.atlauncher.utils.DefaultConfigsFromWorld.Decision;
 
 /**
- * The dialogs for copying a world's server configs to the instance's defaultconfigs folder. The files are read and
- * copied off the event dispatch thread; each choice is asked on it, and waited for.
+ * The prompts for copying a world's server configs to the instance's defaultconfigs folder, and replacing or
+ * removing what's there. The files are read and copied off the event dispatch thread; each choice is asked on it,
+ * and waited for.
  */
 public final class WorldConfigDefaultsDialogs implements DefaultConfigsFromWorld.Choices {
     private final Window parent;
 
-    private WorldConfigDefaultsDialogs(Window parent) {
+    WorldConfigDefaultsDialogs(Window parent) {
         this.parent = parent;
-    }
-
-    public static void start(Window parent, Instance instance) {
-        Thread thread = new Thread(() -> DefaultConfigsFromWorld.run(instance.getRoot(),
-            new WorldConfigDefaultsDialogs(parent)), "WorldConfigDefaults");
-        thread.setDaemon(true);
-        thread.start();
     }
 
     private static <T> T onEdt(Supplier<T> ask) {
@@ -228,6 +221,67 @@ public final class WorldConfigDefaultsDialogs implements DefaultConfigsFromWorld
             folder = folder.getParent();
         }
         return folder;
+    }
+
+    @Override
+    public String chooseReplacement(Path world, List<String> files, String preferred) {
+        return onEdt(() -> {
+            String title = GetText.tr("Choose The Replacement");
+            JList<String> list = new JList<>(files.toArray(new String[0]));
+            list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+            list.getAccessibleContext().setAccessibleName(GetText.tr("Config files"));
+
+            // the file at the same path, when the world has one; never a different one for the user
+            String explanation;
+            int same = files.indexOf(preferred);
+            if (same >= 0) {
+                list.setSelectedIndex(same);
+                list.ensureIndexIsVisible(same);
+                explanation = GetText.tr("The file at the same path, {0}, is chosen. Keep it, or choose another to "
+                    + "replace the default config with.", preferred);
+            } else {
+                explanation = GetText.tr("This world has no {0}. Only choose a different file if you're sure it "
+                    + "should replace it; otherwise, Cancel.", preferred);
+            }
+
+            int option = DialogManager.okCancelDialog().setParent(parent).setTitle(title)
+                .setContent(content(explanation + "\n" + GetText.tr("Paths are relative to {0}.",
+                    world.resolve("serverconfig").toString()), scroll(list, files.size())))
+                .show();
+            if (option != 0) {
+                return null;
+            }
+            if (list.getSelectedIndex() < 0) {
+                nothingChosen(title);
+                return null;
+            }
+            return files.get(list.getSelectedIndex());
+        });
+    }
+
+    @Override
+    public boolean confirmReplace(Path source, Path target) {
+        Boolean confirmed = onEdt(() -> DialogManager.confirmDialog().setParent(parent)
+            .setTitle(GetText.tr("Replace Default Config")).setType(DialogManager.WARNING)
+            .setContent(GetText.tr("Replace this default config:\n{0}\n\nwith:\n{1}\n\nThe current default config "
+                + "will be overwritten. The world's own file isn't changed, and neither are existing worlds.",
+                target.toString(), source.toString()))
+            .addOption(GetText.tr("Replace")).addOption(GetText.tr("Cancel"), true).show() == 0);
+        return Boolean.TRUE.equals(confirmed);
+    }
+
+    @Override
+    public boolean confirmRemove(String relative, Path path, boolean recycle) {
+        Boolean confirmed = onEdt(() -> DialogManager.confirmDialog().setParent(parent)
+            .setTitle(GetText.tr("Remove Default Config")).setType(DialogManager.WARNING)
+            .setContent(GetText.tr("Remove this default config?\n\n{0}\n{1}", relative, path.toString()) + "\n\n"
+                + (recycle
+                    ? GetText.tr("It will be moved to your recycle bin/trash where your system has one; otherwise "
+                        + "it's deleted permanently.")
+                    : GetText.tr("It will be deleted permanently. This can't be undone."))
+                + "\n" + GetText.tr("New worlds won't start with it any more; existing worlds keep their own."))
+            .addOption(GetText.tr("Remove")).addOption(GetText.tr("Cancel"), true).show() == 0);
+        return Boolean.TRUE.equals(confirmed);
     }
 
     @Override
