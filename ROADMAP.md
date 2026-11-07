@@ -119,9 +119,15 @@ Verification:
 Files: `gui/dialogs/EditModsDialog.java`, `data/DisableableMod.java`, `gui/components/ModsJCheckBox.java`,
 `src/main/resources/assets/icon/update.svg`, `build.gradle`. Test: `EditModsDialogSortTest`.
 
-Verification: **not compiled or run with Gradle yet** (dependency downloads were blocked where it was
-written). A javac pass over the sources showed no new errors beyond the missing third-party jars.
-To check: build, run the tests, then open Edit Mods on a big instance and watch the icons and sorting.
+Verification: the Test Build workflow compiled it and passed all unit tests (Java 17), including the
+new sort test. **Not tested by hand yet:** open Edit Mods on a big instance and check the icons,
+the progress label and each sort order.
+
+### Test builds without IntelliJ
+
+`.github/workflows/test-build.yml` tests and builds every push to `feature/**` or `fix/**`, then
+replaces the `test-build` pre-release with `ATLauncher-Enhanced.jar`. `scripts/run-test-build.bat`
+downloads that jar and runs it on `%APPDATA%\ATLauncher` with ATLauncher's bundled Java.
 
 ## 3. Implemented locally but not yet committed
 
