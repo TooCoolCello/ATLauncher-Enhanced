@@ -186,6 +186,10 @@ public class FileUtils {
     }
 
     public static boolean moveFile(Path from, Path to, boolean withFilename) {
+        if (rename(from, withFilename ? to : to.resolve(from.getFileName()))) {
+            return true;
+        }
+
         if (copyFile(from, to, withFilename)) {
             try {
                 // Don't delete the from file in case it's the same file such as on case
@@ -199,6 +203,23 @@ public class FileUtils {
             return true;
         } else {
             LogManager.error("Couldn't move file " + from + " to " + to);
+            return false;
+        }
+    }
+
+    /**
+     * Moves a file by renaming it, replacing the target: instant on the same drive, and it keeps the file's creation
+     * time. False when it can't (a missing folder, a locked file), so the caller can fall back to copying.
+     */
+    static boolean rename(Path from, Path to) {
+        try {
+            if (!Files.isRegularFile(from)) {
+                return false;
+            }
+
+            Files.move(from, to, StandardCopyOption.REPLACE_EXISTING);
+            return true;
+        } catch (IOException | RuntimeException e) {
             return false;
         }
     }

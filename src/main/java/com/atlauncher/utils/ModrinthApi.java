@@ -375,26 +375,8 @@ public class ModrinthApi {
                 queryParamsString += "&";
             }
 
-            List<String> loaders = new ArrayList<>();
-
-            if (loaderVersion.isForge()) {
-                loaders.add("forge");
-            } else if (loaderVersion.isNeoForge()) {
-                List<String> neoForgeForgeCompatabilityVersions = ConfigManager
-                    .getConfigItem("loaders.neoforge.forgeCompatibleMinecraftVersions", new ArrayList<>());
-                if (neoForgeForgeCompatabilityVersions.contains(minecraftVersion)) {
-                    loaders.add("forge");
-                }
-
-                loaders.add("neoforge");
-            } else if (loaderVersion.isFabric()) {
-                loaders.add("fabric");
-            } else if (loaderVersion.isQuilt()) {
-                loaders.add("fabric");
-                loaders.add("quilt");
-            }
-
-            queryParamsString += String.format("loaders=%s", Gsons.DEFAULT_SLIM.toJson(loaders));
+            queryParamsString += String.format("loaders=%s",
+                Gsons.DEFAULT_SLIM.toJson(loaderFilter(loaderVersion, minecraftVersion)));
         }
 
         java.lang.reflect.Type type = new TypeToken<List<ModrinthVersion>>() {
@@ -403,6 +385,55 @@ public class ModrinthApi {
         return NetworkClient.get(
             String.format("%s/project/%s/version%s", Constants.MODRINTH_API_URL, projectId, queryParamsString),
             getHeaders(),
+            type);
+    }
+
+    /**
+     * The Modrinth loaders a loader's mods can be for: Forge as well on NeoForge's Forge-compatible Minecraft versions,
+     * Fabric as well on Quilt. Empty for loaders Modrinth has no mods for.
+     */
+    public static List<String> loaderFilter(LoaderVersion loaderVersion, String minecraftVersion) {
+        List<String> loaders = new ArrayList<>();
+
+        if (loaderVersion.isForge()) {
+            loaders.add("forge");
+        } else if (loaderVersion.isNeoForge()) {
+            List<String> neoForgeForgeCompatabilityVersions = ConfigManager
+                .getConfigItem("loaders.neoforge.forgeCompatibleMinecraftVersions", new ArrayList<>());
+            if (neoForgeForgeCompatabilityVersions.contains(minecraftVersion)) {
+                loaders.add("forge");
+            }
+
+            loaders.add("neoforge");
+        } else if (loaderVersion.isFabric()) {
+            loaders.add("fabric");
+        } else if (loaderVersion.isQuilt()) {
+            loaders.add("fabric");
+            loaders.add("quilt");
+        }
+
+        return loaders;
+    }
+
+    /**
+     * For each installed file (by SHA-1), its project's newest version for this Minecraft version and these loaders,
+     * in one request. Hashes with no such version are left out. Null when the request fails.
+     */
+    public static @Nullable Map<String, ModrinthVersion> getLatestVersionsFromSha1Hashes(String[] hashes,
+        List<String> loaders, String minecraftVersion) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("hashes", hashes);
+        body.put("algorithm", "sha1");
+        body.put("loaders", loaders);
+        body.put("game_versions", Collections.singletonList(minecraftVersion));
+
+        java.lang.reflect.Type type = new TypeToken<Map<String, ModrinthVersion>>() {
+        }.getType();
+
+        return NetworkClient.post(
+            String.format("%s/version_files/update", Constants.MODRINTH_API_URL),
+            getHeaders(), RequestBody.create(Gsons.DEFAULT_SLIM.toJson(body),
+                MediaType.get("application/json; charset=utf-8")),
             type);
     }
 

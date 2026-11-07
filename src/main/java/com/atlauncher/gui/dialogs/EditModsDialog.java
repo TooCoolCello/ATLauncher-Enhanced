@@ -34,6 +34,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -44,6 +46,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -73,6 +76,7 @@ import org.mini2Dx.gettext.GetText;
 
 import com.atlauncher.App;
 import com.atlauncher.builders.HTMLBuilder;
+import com.atlauncher.data.BulkUpdateCheck;
 import com.atlauncher.data.DisableableMod;
 import com.atlauncher.data.Instance;
 import com.atlauncher.data.ModManagement;
@@ -231,7 +235,7 @@ public class EditModsDialog extends JDialog {
         searchPanel.add(sortBox);
 
         JButton refreshButton = new JButton(GetText.tr("Refresh"));
-        refreshButton.setToolTipText(GetText.tr("Rescan the mod folders and check for updates again"));
+        refreshButton.setToolTipText(GetText.tr("Show mods added or removed outside the launcher"));
         refreshButton.addActionListener(e -> refresh());
         searchPanel.add(refreshButton);
 
@@ -453,27 +457,19 @@ public class EditModsDialog extends JDialog {
             .filter(m -> !m.skipped && m.type != com.atlauncher.data.Type.worlds).collect(Collectors.toList());
         enabledMods = new ArrayList<>();
         disabledMods = new ArrayList<>();
-        int dCount = 0;
-        int eCount = 0;
-
+        boolean canCheckForUpdates = canCheckForUpdates();
         for (DisableableMod mod : mods) {
-            ModsJCheckBox checkBox;
-            int nameSize = getFontMetrics(App.THEME.getNormalFont()).stringWidth(mod.getName());
-
-            checkBox = new ModsJCheckBox(mod, this);
-            if (canCheckForUpdates()) {
+            ModsJCheckBox checkBox = new ModsJCheckBox(mod, this);
+            if (canCheckForUpdates) {
                 checkBox.showUpdateSlot();
-                checkBox.setUpdateStatus(updateStatuses.get(mod));
+
+                DisableableMod.UpdateStatus status = updateStatuses.get(mod);
+                if (status != null) {
+                    checkBox.setUpdateStatus(status);
+                }
             }
-            if (mod.isDisabled()) {
-                checkBox.setBounds(0, (dCount * 20), Math.max(nameSize + 23, 250), 20);
-                disabledMods.add(checkBox);
-                dCount++;
-            } else {
-                checkBox.setBounds(0, (eCount * 20), Math.max(nameSize + 23, 250), 20);
-                enabledMods.add(checkBox);
-                eCount++;
-            }
+
+            (mod.isDisabled() ? disabledMods : enabledMods).add(checkBox);
         }
 
         rows().forEach(checkBox -> checkBox.addItemListener(e -> {
@@ -559,8 +555,8 @@ public class EditModsDialog extends JDialog {
 
     /**
      * When the mod's file arrived in the folder: its creation time where the file system keeps one (Windows, macOS),
-     * else its last modified time. Updating replaces the file, and enabling or disabling copies it, so both count as
-     * adding it again.
+     * else its last modified time. Enabling or disabling renames the file, which keeps it; updating replaces the file,
+     * so an updated mod counts as newly added.
      */
     private long addedTime(DisableableMod mod) {
         File file = mod.isDisabled() ? mod.getDisabledFile(instanceOrServer) : mod.getFile(instanceOrServer);
@@ -576,56 +572,76 @@ public class EditModsDialog extends JDialog {
     }
 
     /**
-     * Checks every CurseForge/Modrinth mod not checked yet, in the background, for the update icon. A mod updated
-     * since is a new object, so it gets checked again.
+     * Checks every CurseForge/Modrinth mod not checked yet, in the background, for the update icon: a few batch
+     * requests settle most of them, then the rest get the full per-mod check, a few at a time. A mod updated since is
+     * a new object, so it gets checked again.
      */
     private void queueUpdateChecks() {
-        // ponytail: one thread, Modrinth paced under its 300 requests a minute. Reopening the dialog checks everything
-        // again (CurseForge answers from the 10 minute HTTP cache). Share results between dialogs if that trips limits.
+        List<DisableableMod> unchecked = rows().map(ModsJCheckBox::getDisableableMod)
+            .filter(mod -> mod.isUpdatable() && !updateStatuses.containsKey(mod)).collect(Collectors.toList());
+        if (unchecked.isEmpty()) {
+            showUpdateCheckProgress();
+            return;
+        }
+
         if (updateChecker == null) {
-            updateChecker = Executors.newSingleThreadExecutor(r -> {
+            // ponytail: 4 threads for the per-mod leftovers, usually only mods with an update; reopening the dialog
+            // checks again. Share results between dialogs if that ever trips rate limits.
+            updateChecker = Executors.newFixedThreadPool(4, r -> {
                 Thread thread = new Thread(r, "Edit Mods update checks");
                 thread.setDaemon(true);
                 return thread;
             });
         }
 
-        rows().map(ModsJCheckBox::getDisableableMod)
-            .filter(mod -> mod.isUpdatable() && !updateStatuses.containsKey(mod)).forEach(mod -> {
-                updateStatuses.put(mod, DisableableMod.UpdateStatus.CHECKING);
-
-                updateChecker.execute(() -> {
-                    DisableableMod.UpdateStatus status;
-                    try {
-                        status = mod.fetchUpdateStatus(instanceOrServer);
-                    } catch (RuntimeException e) {
-                        LogManager.logStackTrace("Error checking " + mod.name + " for updates", e, false);
-                        status = DisableableMod.UpdateStatus.UNKNOWN;
-                    }
-
-                    updateStatuses.put(mod, status);
-                    SwingUtilities.invokeLater(() -> updateChecked(mod));
-
-                    if (mod.isFromModrinth()) {
-                        try {
-                            Thread.sleep(250);
-                        } catch (InterruptedException e) {
-                            Thread.currentThread().interrupt();
-                        }
-                    }
-                });
-            });
-
+        unchecked.forEach(mod -> updateStatuses.put(mod, DisableableMod.UpdateStatus.CHECKING));
         showUpdateCheckProgress();
+
+        updateChecker.execute(() -> {
+            Map<DisableableMod, DisableableMod.UpdateStatus> settled;
+            try {
+                settled = BulkUpdateCheck.settle(instanceOrServer, unchecked);
+            } catch (RuntimeException e) {
+                LogManager.logStackTrace("Error checking mods for updates in bulk", e, false);
+                settled = Collections.emptyMap();
+            }
+
+            updateStatuses.putAll(settled);
+            Set<DisableableMod> settledMods = settled.keySet();
+            SwingUtilities.invokeLater(() -> updateChecked(settledMods));
+
+            for (DisableableMod mod : unchecked) {
+                if (settledMods.contains(mod)) {
+                    continue;
+                }
+
+                try {
+                    updateChecker.execute(() -> {
+                        DisableableMod.UpdateStatus status;
+                        try {
+                            status = mod.fetchUpdateStatus(instanceOrServer);
+                        } catch (RuntimeException e) {
+                            LogManager.logStackTrace("Error checking " + mod.name + " for updates", e, false);
+                            status = DisableableMod.UpdateStatus.UNKNOWN;
+                        }
+
+                        updateStatuses.put(mod, status);
+                        SwingUtilities.invokeLater(() -> updateChecked(Collections.singleton(mod)));
+                    });
+                } catch (RejectedExecutionException e) {
+                    return; // the dialog closed
+                }
+            }
+        });
     }
 
-    private void updateChecked(DisableableMod mod) {
+    private void updateChecked(Collection<DisableableMod> mods) {
         if (enabledMods == null || disabledMods == null) {
             return;
         }
 
-        rows().filter(row -> row.getDisableableMod() == mod)
-            .forEach(row -> row.setUpdateStatus(updateStatuses.get(mod)));
+        rows().filter(row -> mods.contains(row.getDisableableMod()))
+            .forEach(row -> row.setUpdateStatus(updateStatuses.get(row.getDisableableMod())));
 
         // re-sort once, when the last result is in, rather than moving rows around while they're being picked
         if (showUpdateCheckProgress() == 0 && (SortOrder) sortBox.getSelectedItem() == SortOrder.UPDATE_AVAILABLE) {
@@ -1033,14 +1049,8 @@ public class EditModsDialog extends JDialog {
         reloadPanels();
     }
 
-    // picks up mod files added or removed outside the launcher, then checks every mod for updates again
+    // picks up mod files added or removed outside the launcher; mods already checked keep their update status
     private void refresh() {
-        if (updateChecker != null) {
-            updateChecker.shutdownNow();
-            updateChecker = null;
-        }
-        updateStatuses.clear();
-
         instanceOrServer.scanMissingMods(this);
         reloadPanels();
     }

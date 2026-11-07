@@ -42,6 +42,7 @@ import com.atlauncher.data.minecraft.FabricMod;
 import com.atlauncher.data.minecraft.MCMod;
 import com.atlauncher.data.minecraft.loaders.LoaderVersion;
 import com.atlauncher.data.modrinth.ModrinthDownloadMetadata;
+import com.atlauncher.data.modrinth.ModrinthFile;
 import com.atlauncher.data.modrinth.ModrinthProject;
 import com.atlauncher.data.modrinth.ModrinthVersion;
 import com.atlauncher.exceptions.InvalidMinecraftVersion;
@@ -485,7 +486,7 @@ public class DisableableMod implements Serializable {
     }
 
     // the platform Check For Updates uses for a mod from both: the default mod platform setting decides
-    private ModPlatform defaultUpdatePlatform() {
+    ModPlatform defaultUpdatePlatform() {
         if (isFromCurseForge() && (!isFromModrinth() || App.settings.defaultModPlatform == ModPlatform.CURSEFORGE)) {
             return ModPlatform.CURSEFORGE;
         }
@@ -738,9 +739,52 @@ public class DisableableMod implements Serializable {
                     .filter(v -> v.gameVersions.contains(instanceOrServer.getMinecraftVersion()));
         }
 
-        return versionsStream.anyMatch(v -> ISODateTimeFormat.dateTimeParser().parseDateTime(v.datePublished)
-                .minusSeconds(1)
-                .isAfter(ISODateTimeFormat.dateTimeParser().parseDateTime(modrinthVersion.datePublished)));
+        return versionsStream.anyMatch(this::isNewerThanInstalled);
+    }
+
+    private boolean isNewerThanInstalled(ModrinthVersion version) {
+        return ISODateTimeFormat.dateTimeParser().parseDateTime(version.datePublished).minusSeconds(1)
+                .isAfter(ISODateTimeFormat.dateTimeParser().parseDateTime(modrinthVersion.datePublished));
+    }
+
+    /**
+     * The SHA-1 Modrinth lists for the installed file: the version's file with this file's name, else its primary
+     * file. Null when the stored version doesn't have one.
+     */
+    String installedModrinthSha1() {
+        if (modrinthVersion.files == null) {
+            return null;
+        }
+
+        Optional<ModrinthFile> installed = modrinthVersion.files.stream()
+                .filter(f -> f != null && file != null && file.equals(f.filename)).findFirst();
+        if (!installed.isPresent()) {
+            installed = modrinthVersion.files.stream().filter(f -> f != null && f.primary).findFirst();
+        }
+
+        return installed.map(f -> f.hashes == null ? null : f.hashes.get("sha1")).orElse(null);
+    }
+
+    /**
+     * What Modrinth's answer to "newest version of the installed file for this Minecraft version and loaders" settles:
+     * not newer means no update, a newer one that may update this file means an update. Null when it can't settle it
+     * (no answer, missing dates, or the newest is for another loader path or type while an older one might still do),
+     * so the full check decides.
+     */
+    UpdateStatus modrinthBatchVerdict(ModManagement instanceOrServer, ModrinthVersion newest,
+            SinytraConnector.InstalledPath installedPath, List<String> neoForgeForgeCompatibleVersions) {
+        if (newest == null || newest.datePublished == null || modrinthVersion.datePublished == null) {
+            return null;
+        }
+
+        if ((newest.id != null && newest.id.equals(modrinthVersion.id)) || !isNewerThanInstalled(newest)) {
+            return UpdateStatus.UP_TO_DATE;
+        }
+
+        return hasModrinthUpdate(instanceOrServer, modrinthUpdateCandidates(instanceOrServer,
+                Collections.singletonList(newest), installedPath, neoForgeForgeCompatibleVersions))
+                        ? UpdateStatus.AVAILABLE
+                        : null;
     }
 
     public boolean reinstall(Window parent, ModManagement instanceOrServer) {

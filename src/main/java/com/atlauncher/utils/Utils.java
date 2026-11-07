@@ -224,6 +224,12 @@ public class Utils {
      * @return true, if successful
      */
     public static boolean moveFile(File from, File to, boolean withFilename) {
+        // URIs can only be copied
+        if (!from.toString().startsWith("file:")
+            && FileUtils.rename(from.toPath(), (withFilename ? to : new File(to, from.getName())).toPath())) {
+            return true;
+        }
+
         if (copyFile(from, to, withFilename)) {
             delete(from);
             return true;

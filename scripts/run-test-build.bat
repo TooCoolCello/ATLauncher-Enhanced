@@ -2,6 +2,7 @@
 rem Downloads the newest ATLauncher-Enhanced test build (made by GitHub on every push to a feature/fix branch)
 rem and runs it on your installed ATLauncher's folder, so it sees the same instances.
 rem Close the real ATLauncher first: both launchers write the same files.
+rem Extra arguments go to the launcher, e.g. --debug --debug-level=5 logs how long each step takes.
 setlocal
 
 set "DATA=%APPDATA%\ATLauncher"
@@ -42,4 +43,4 @@ rem ATLauncher's own bundled Java, else whatever Java is on PATH
 set "JAVA=%DATA%\jre\bin\javaw.exe"
 if not exist "%JAVA%" set "JAVA=javaw"
 
-start "" "%JAVA%" -Djna.nosys=true -Djava.net.preferIPv4Stack=true -Dawt.useSystemAAFontSettings=on -Dswing.aatext=true -jar "%JAR%" "--working-dir=%DATA%" --no-launcher-update
+start "" "%JAVA%" -Djna.nosys=true -Djava.net.preferIPv4Stack=true -Dawt.useSystemAAFontSettings=on -Dswing.aatext=true -jar "%JAR%" "--working-dir=%DATA%" --no-launcher-update %*

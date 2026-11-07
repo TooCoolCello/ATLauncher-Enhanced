@@ -115,7 +115,15 @@ public class ModsJCheckBox extends JCheckBox {
         }
 
         if (this.dialog != null) {
-            setupContextMenu();
+            // built on right-click: building a menu for every row made opening and reloading Edit Mods slow
+            addMouseListener(new MouseAdapter() {
+                @Override
+                public void mousePressed(MouseEvent e) {
+                    if (e.getButton() == MouseEvent.BUTTON3) {
+                        createContextMenu().show(ModsJCheckBox.this, e.getX(), e.getY());
+                    }
+                }
+            });
         }
     }
 
@@ -194,7 +202,7 @@ public class ModsJCheckBox extends JCheckBox {
         }
     }
 
-    private void setupContextMenu() {
+    private JPopupMenu createContextMenu() {
         JPopupMenu contextMenu = new JPopupMenu();
 
         JMenuItem fileItem = new JMenuItem(getDisableableMod().file);
@@ -474,14 +482,7 @@ public class ModsJCheckBox extends JCheckBox {
             contextMenu.add(checkForUpdates);
         }
 
-        addMouseListener(new MouseAdapter() {
-            @Override
-            public void mousePressed(MouseEvent e) {
-                if (e.getButton() == MouseEvent.BUTTON3) {
-                    contextMenu.show(ModsJCheckBox.this, e.getX(), e.getY());
-                }
-            }
-        });
+        return contextMenu;
     }
 
     @Override
