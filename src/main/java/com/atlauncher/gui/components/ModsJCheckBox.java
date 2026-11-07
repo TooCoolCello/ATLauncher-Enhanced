@@ -17,13 +17,17 @@
  */
 package com.atlauncher.gui.components;
 
+import java.awt.Component;
+import java.awt.Graphics;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 
+import javax.swing.Icon;
 import javax.swing.JCheckBox;
 import javax.swing.JMenuItem;
 import javax.swing.JPopupMenu;
 import javax.swing.JToolTip;
+import javax.swing.UIManager;
 
 import org.mini2Dx.gettext.GetText;
 
@@ -42,6 +46,8 @@ import com.atlauncher.gui.dialogs.ModsChooser;
 import com.atlauncher.managers.DialogManager;
 import com.atlauncher.utils.OS;
 import com.atlauncher.utils.Utils;
+import com.formdev.flatlaf.extras.FlatSVGIcon;
+import com.formdev.flatlaf.util.UIScale;
 
 /**
  * This class extends {@link JCheckBox} and overrides the need to use JCheckBox
@@ -51,6 +57,10 @@ import com.atlauncher.utils.Utils;
  * to colour mod's names.
  */
 public class ModsJCheckBox extends JCheckBox {
+    private static final Icon UPDATE_ICON = new FlatSVGIcon("assets/icon/update.svg", 14, 14);
+
+    private DisableableMod.UpdateStatus updateStatus;
+
     /**
      * The mod this object will use to display it's data. Will be type {@link Mod},
      * {@link com.atlauncher.data.json.Mod} or {@link DisableableMod}.
@@ -129,6 +139,59 @@ public class ModsJCheckBox extends JCheckBox {
      */
     public DisableableMod getDisableableMod() {
         return (DisableableMod) this.mod;
+    }
+
+    /**
+     * Reserves a slot beside the check box for the update icon, so names line up whether or not a mod has an update.
+     * The icon sits before the name, where a long name can't push it out of view.
+     */
+    public void showUpdateSlot() {
+        Icon checkBox = UIManager.getIcon("CheckBox.icon");
+
+        if (checkBox != null) {
+            setIcon(new CheckBoxWithUpdateIcon(checkBox));
+        }
+    }
+
+    public void setUpdateStatus(DisableableMod.UpdateStatus updateStatus) {
+        this.updateStatus = updateStatus;
+
+        String description = getDisableableMod().getDescription();
+        String tooltip = updateStatus == DisableableMod.UpdateStatus.AVAILABLE
+                ? GetText.tr("Update available") + (description.isEmpty() ? "" : "<br/><br/>" + description)
+                : description;
+        setToolTipText(tooltip.isEmpty() ? null : new HTMLBuilder().text(tooltip).split(100).build());
+
+        repaint();
+    }
+
+    // the look and feel's check box, then the update icon or blank space the same size
+    private class CheckBoxWithUpdateIcon implements Icon {
+        private final Icon checkBox;
+
+        CheckBoxWithUpdateIcon(Icon checkBox) {
+            this.checkBox = checkBox;
+        }
+
+        @Override
+        public void paintIcon(Component c, Graphics g, int x, int y) {
+            checkBox.paintIcon(c, g, x, y + (getIconHeight() - checkBox.getIconHeight()) / 2);
+
+            if (updateStatus == DisableableMod.UpdateStatus.AVAILABLE) {
+                UPDATE_ICON.paintIcon(c, g, x + checkBox.getIconWidth() + UIScale.scale(4),
+                        y + (getIconHeight() - UPDATE_ICON.getIconHeight()) / 2);
+            }
+        }
+
+        @Override
+        public int getIconWidth() {
+            return checkBox.getIconWidth() + UIScale.scale(4) + UPDATE_ICON.getIconWidth();
+        }
+
+        @Override
+        public int getIconHeight() {
+            return Math.max(checkBox.getIconHeight(), UPDATE_ICON.getIconHeight());
+        }
     }
 
     private void setupContextMenu() {

@@ -100,6 +100,29 @@ Verification:
   These rely on the automated coverage.
 - `.idea/gradle.xml` is an unrelated local modification. **Never stage it with this work.**
 
+### Edit Mods update icons and sorting
+
+**Branch:** `feature/edit-mods-update-sort` (based on `feature/defaultconfigs-manage`).
+
+- Opening Edit Mods checks every CurseForge/Modrinth mod for updates in the background and shows a
+  green arrow beside the check box of each mod with one. `DisableableMod.fetchUpdateStatus` uses the
+  same platform choice, version restriction and Sinytra loader-path rules as Check For Updates (the
+  Modrinth part is shared through `fetchModrinthUpdateCandidates`). One thread; Modrinth checks are
+  paced under its 300 requests/minute limit. Results last for the open dialog only.
+- Sort By: Name, Date Added (newest first, from the file's creation time, so updating or
+  enabling/disabling a mod counts as adding it again), Update Available. Re-sorting keeps the rows,
+  so selections survive. The choice is remembered until the launcher closes.
+- `gradlew runShared` runs the fork on the installed ATLauncher's data folder
+  (`%APPDATA%\ATLauncher`, or `-PatlauncherDir=...`) with launcher self-update off. Close the real
+  ATLauncher first. Fork-only settings and instance fields are dropped whenever the real launcher saves.
+
+Files: `gui/dialogs/EditModsDialog.java`, `data/DisableableMod.java`, `gui/components/ModsJCheckBox.java`,
+`src/main/resources/assets/icon/update.svg`, `build.gradle`. Test: `EditModsDialogSortTest`.
+
+Verification: **not compiled or run with Gradle yet** (dependency downloads were blocked where it was
+written). A javac pass over the sources showed no new errors beyond the missing third-party jars.
+To check: build, run the tests, then open Edit Mods on a big instance and watch the icons and sorting.
+
 ## 3. Implemented locally but not yet committed
 
 Nothing at present.

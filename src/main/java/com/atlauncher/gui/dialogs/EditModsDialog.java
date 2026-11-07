@@ -29,6 +29,8 @@ import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -37,13 +39,18 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import javax.swing.AbstractAction;
 import javax.swing.AbstractButton;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
+import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
@@ -93,6 +100,25 @@ import com.formdev.flatlaf.icons.FlatSearchIcon;
 public class EditModsDialog extends JDialog {
     private static final long serialVersionUID = 7004414192679481818L;
 
+    enum SortOrder {
+        NAME, DATE_ADDED, UPDATE_AVAILABLE;
+
+        @Override
+        public String toString() {
+            switch (this) {
+                case DATE_ADDED:
+                    return GetText.tr("Date Added");
+                case UPDATE_AVAILABLE:
+                    return GetText.tr("Update Available");
+                default:
+                    return GetText.tr("Name");
+            }
+        }
+    }
+
+    // ponytail: remembered until the launcher closes, not saved to settings
+    private static SortOrder lastSortOrder = SortOrder.NAME;
+
     public final ModManagement instanceOrServer;
 
     private JPanel disabledModsPanel, enabledModsPanel;
@@ -105,6 +131,10 @@ public class EditModsDialog extends JDialog {
     private JCheckBox selectAllEnabledModsCheckbox, selectAllDisabledModsCheckbox;
     private ArrayList<ModsJCheckBox> enabledMods, disabledMods;
     private final JTextField searchField = new JTextField(20);
+    private final JComboBox<SortOrder> sortBox = new JComboBox<>();
+    private final JLabel updateCheckLabel = new JLabel();
+    private final Map<DisableableMod, DisableableMod.UpdateStatus> updateStatuses = new ConcurrentHashMap<>();
+    private ExecutorService updateChecker;
 
     public EditModsDialog(Instance instance) {
         super(App.launcher.getParent(),
@@ -164,7 +194,7 @@ public class EditModsDialog extends JDialog {
         split.setEnabled(false);
         add(split, BorderLayout.NORTH);
 
-        JPanel searchPanel = new JPanel(new FlowLayout());
+        JPanel searchPanel = new JPanel(new WrapLayout());
         searchField.putClientProperty("JTextField.placeholderText", GetText.tr("Search"));
         searchField.putClientProperty("JTextField.leadingIcon", new FlatSearchIcon());
         searchField.putClientProperty("JTextField.showClearButton", true);
@@ -187,6 +217,21 @@ public class EditModsDialog extends JDialog {
             }
         });
         searchPanel.add(searchField);
+
+        sortBox.addItem(SortOrder.NAME);
+        sortBox.addItem(SortOrder.DATE_ADDED);
+        if (canCheckForUpdates()) {
+            sortBox.addItem(SortOrder.UPDATE_AVAILABLE);
+        }
+        sortBox.setSelectedItem(lastSortOrder);
+        sortBox.addActionListener(e -> {
+            lastSortOrder = (SortOrder) sortBox.getSelectedItem();
+            applySort();
+        });
+        searchPanel.add(new JLabel(GetText.tr("Sort By")));
+        searchPanel.add(sortBox);
+        searchPanel.add(updateCheckLabel);
+
         split.setLeftComponent(searchPanel);
 
         JSplitPane labels = new JSplitPane();
@@ -351,8 +396,7 @@ public class EditModsDialog extends JDialog {
         });
         bottomPanel.add(addButton);
 
-        if (instanceOrServer instanceof Server || (instanceOrServer instanceof Instance
-            && ((Instance) instanceOrServer).launcher.enableCurseForgeIntegration)) {
+        if (canCheckForUpdates()) {
             if (ConfigManager.getConfigItem("platforms.curseforge.modsEnabled", true)
                 || (ConfigManager.getConfigItem("platforms.modrinth.modsEnabled", true)
                 && (instanceOrServer.getLoaderVersion() != null
@@ -408,8 +452,7 @@ public class EditModsDialog extends JDialog {
         }
 
         List<DisableableMod> mods = instanceOrServer.getMods().stream().filter(DisableableMod::wasSelected)
-            .filter(m -> !m.skipped && m.type != com.atlauncher.data.Type.worlds)
-            .sorted(Comparator.comparing(m -> m.name, String.CASE_INSENSITIVE_ORDER)).collect(Collectors.toList());
+            .filter(m -> !m.skipped && m.type != com.atlauncher.data.Type.worlds).collect(Collectors.toList());
         enabledMods = new ArrayList<>();
         disabledMods = new ArrayList<>();
         int dCount = 0;
@@ -420,6 +463,10 @@ public class EditModsDialog extends JDialog {
             int nameSize = getFontMetrics(App.THEME.getNormalFont()).stringWidth(mod.getName());
 
             checkBox = new ModsJCheckBox(mod, this);
+            if (canCheckForUpdates()) {
+                checkBox.showUpdateSlot();
+                checkBox.setUpdateStatus(updateStatuses.get(mod));
+            }
             if (mod.isDisabled()) {
                 checkBox.setBounds(0, (dCount * 20), Math.max(nameSize + 23, 250), 20);
                 disabledMods.add(checkBox);
@@ -431,25 +478,188 @@ public class EditModsDialog extends JDialog {
             }
         }
 
-        for (ModsJCheckBox checkBox : enabledMods) {
-            checkBox.addItemListener(e -> {
-                if (e.getStateChange() == ItemEvent.SELECTED || e.getStateChange() == ItemEvent.DESELECTED) {
-                    checkBoxesChanged();
-                }
-            });
-            enabledModsPanel.add(checkBox);
+        rows().forEach(checkBox -> checkBox.addItemListener(e -> {
+            if (e.getStateChange() == ItemEvent.SELECTED || e.getStateChange() == ItemEvent.DESELECTED) {
+                checkBoxesChanged();
+            }
+        }));
+
+        if (canCheckForUpdates()) {
+            queueUpdateChecks();
         }
-        for (ModsJCheckBox checkBox : disabledMods) {
-            checkBox.addItemListener(e -> {
-                if (e.getStateChange() == ItemEvent.SELECTED || e.getStateChange() == ItemEvent.DESELECTED) {
-                    checkBoxesChanged();
-                }
-            });
-            disabledModsPanel.add(checkBox);
-        }
+
+        // puts the rows in their panels in the chosen order
+        applySort();
 
         // keeps the current search across refreshes and sets the list heights
         applyFilter();
+    }
+
+    private Stream<ModsJCheckBox> rows() {
+        return Stream.concat(enabledMods.stream(), disabledMods.stream());
+    }
+
+    /**
+     * Orders the rows and refills the panels with them. The rows themselves are kept, so a re-sort doesn't lose the
+     * selection.
+     */
+    private void applySort() {
+        if (enabledMods == null || disabledMods == null) {
+            return;
+        }
+
+        SortOrder order = (SortOrder) sortBox.getSelectedItem();
+        Map<DisableableMod, Long> addedTimes = new HashMap<>();
+        if (order == SortOrder.DATE_ADDED) {
+            rows().forEach(row -> addedTimes.put(row.getDisableableMod(), addedTime(row.getDisableableMod())));
+        }
+
+        Comparator<ModsJCheckBox> rowOrder = Comparator.comparing(ModsJCheckBox::getDisableableMod,
+            sortComparator(order, addedTimes, updateStatuses));
+        enabledMods.sort(rowOrder);
+        disabledMods.sort(rowOrder);
+
+        refill(enabledModsPanel, enabledMods);
+        refill(disabledModsPanel, disabledMods);
+    }
+
+    private static void refill(JPanel panel, List<ModsJCheckBox> rows) {
+        panel.removeAll();
+        rows.forEach(panel::add);
+        panel.revalidate();
+        panel.repaint();
+    }
+
+    /**
+     * Name A-Z; Date Added newest first; Update Available puts updates first, then mods still being checked. Ties go
+     * by name.
+     */
+    static Comparator<DisableableMod> sortComparator(SortOrder order, Map<DisableableMod, Long> addedTimes,
+        Map<DisableableMod, DisableableMod.UpdateStatus> updateStatuses) {
+        Comparator<DisableableMod> byName = Comparator.comparing(m -> m.name, String.CASE_INSENSITIVE_ORDER);
+
+        if (order == SortOrder.DATE_ADDED) {
+            return Comparator.<DisableableMod>comparingLong(m -> addedTimes.getOrDefault(m, 0L)).reversed()
+                .thenComparing(byName);
+        }
+
+        if (order == SortOrder.UPDATE_AVAILABLE) {
+            return Comparator.<DisableableMod>comparingInt(m -> updateRank(updateStatuses.get(m)))
+                .thenComparing(byName);
+        }
+
+        return byName;
+    }
+
+    private static int updateRank(DisableableMod.UpdateStatus status) {
+        if (status == DisableableMod.UpdateStatus.AVAILABLE) {
+            return 0;
+        }
+
+        return status == DisableableMod.UpdateStatus.CHECKING ? 1 : 2;
+    }
+
+    /**
+     * When the mod's file arrived in the folder: its creation time where the file system keeps one (Windows, macOS),
+     * else its last modified time. Updating replaces the file, and enabling or disabling copies it, so both count as
+     * adding it again.
+     */
+    private long addedTime(DisableableMod mod) {
+        File file = mod.isDisabled() ? mod.getDisabledFile(instanceOrServer) : mod.getFile(instanceOrServer);
+        if (file == null) {
+            return 0;
+        }
+
+        try {
+            return Files.readAttributes(file.toPath(), BasicFileAttributes.class).creationTime().toMillis();
+        } catch (IOException e) {
+            return 0;
+        }
+    }
+
+    /**
+     * Checks every CurseForge/Modrinth mod not checked yet, in the background, for the update icon. A mod updated
+     * since is a new object, so it gets checked again.
+     */
+    private void queueUpdateChecks() {
+        // ponytail: one thread, Modrinth paced under its 300 requests a minute. Reopening the dialog checks everything
+        // again (CurseForge answers from the 10 minute HTTP cache). Share results between dialogs if that trips limits.
+        if (updateChecker == null) {
+            updateChecker = Executors.newSingleThreadExecutor(r -> {
+                Thread thread = new Thread(r, "Edit Mods update checks");
+                thread.setDaemon(true);
+                return thread;
+            });
+        }
+
+        rows().map(ModsJCheckBox::getDisableableMod)
+            .filter(mod -> mod.isUpdatable() && !updateStatuses.containsKey(mod)).forEach(mod -> {
+                updateStatuses.put(mod, DisableableMod.UpdateStatus.CHECKING);
+
+                updateChecker.execute(() -> {
+                    DisableableMod.UpdateStatus status;
+                    try {
+                        status = mod.fetchUpdateStatus(instanceOrServer);
+                    } catch (RuntimeException e) {
+                        LogManager.logStackTrace("Error checking " + mod.name + " for updates", e, false);
+                        status = DisableableMod.UpdateStatus.UNKNOWN;
+                    }
+
+                    updateStatuses.put(mod, status);
+                    SwingUtilities.invokeLater(() -> updateChecked(mod));
+
+                    if (mod.isFromModrinth()) {
+                        try {
+                            Thread.sleep(250);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                    }
+                });
+            });
+
+        showUpdateCheckProgress();
+    }
+
+    private void updateChecked(DisableableMod mod) {
+        if (enabledMods == null || disabledMods == null) {
+            return;
+        }
+
+        rows().filter(row -> row.getDisableableMod() == mod)
+            .forEach(row -> row.setUpdateStatus(updateStatuses.get(mod)));
+
+        // re-sort once, when the last result is in, rather than moving rows around while they're being picked
+        if (showUpdateCheckProgress() == 0 && (SortOrder) sortBox.getSelectedItem() == SortOrder.UPDATE_AVAILABLE) {
+            applySort();
+        }
+    }
+
+    // returns how many shown mods are still being checked
+    private long showUpdateCheckProgress() {
+        long checking = rows().filter(
+            row -> updateStatuses.get(row.getDisableableMod()) == DisableableMod.UpdateStatus.CHECKING).count();
+        long available = rows().filter(
+            row -> updateStatuses.get(row.getDisableableMod()) == DisableableMod.UpdateStatus.AVAILABLE).count();
+
+        if (checking > 0) {
+            updateCheckLabel.setText(GetText.tr("Checking for updates: {0} left", checking));
+        } else if (available > 0) {
+            updateCheckLabel.setText(GetText.tr("Updates available: {0}", available));
+        } else {
+            updateCheckLabel.setText("");
+        }
+
+        return checking;
+    }
+
+    @Override
+    public void dispose() {
+        if (updateChecker != null) {
+            updateChecker.shutdownNow();
+        }
+
+        super.dispose();
     }
 
     /**
@@ -533,9 +743,14 @@ public class EditModsDialog extends JDialog {
         return false;
     }
 
+    // the Check For Updates and Reinstall buttons, and the update icons, need CurseForge/Modrinth integration
+    private boolean canCheckForUpdates() {
+        return instanceOrServer instanceof Server || (instanceOrServer instanceof Instance
+            && ((Instance) instanceOrServer).launcher.enableCurseForgeIntegration);
+    }
+
     private void checkBoxesChanged() {
-        if (instanceOrServer instanceof Server || (instanceOrServer instanceof Instance
-            && ((Instance) instanceOrServer).launcher.enableCurseForgeIntegration)) {
+        if (canCheckForUpdates()) {
             boolean hasSelectedACurseForgeOrModrinthMod = (enabledMods.stream().anyMatch(AbstractButton::isSelected)
                 && enabledMods.stream().filter(AbstractButton::isSelected)
                 .anyMatch(cb -> cb.getDisableableMod().isUpdatable()))

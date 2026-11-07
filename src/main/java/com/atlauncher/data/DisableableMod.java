@@ -25,6 +25,7 @@ import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Predicate;
@@ -61,6 +62,13 @@ import com.atlauncher.utils.Utils;
 import com.google.gson.annotations.SerializedName;
 
 public class DisableableMod implements Serializable {
+    /**
+     * Result of a background update check, see {@link #fetchUpdateStatus}.
+     */
+    public enum UpdateStatus {
+        CHECKING, AVAILABLE, UP_TO_DATE, UNKNOWN
+    }
+
     public String name;
     public String version;
     public boolean optional;
@@ -383,8 +391,11 @@ public class DisableableMod implements Serializable {
     public boolean checkForUpdate(Window parent, ModManagement instanceOrServer, ModPlatform platform) {
         Analytics.trackEvent(AnalyticsEvent.simpleEvent("mod_update_check"));
 
-        if (platform == ModPlatform.CURSEFORGE || (platform == null && isFromCurseForge()
-                && (!isFromModrinth() || App.settings.defaultModPlatform == ModPlatform.CURSEFORGE))) {
+        if (platform == null) {
+            platform = defaultUpdatePlatform();
+        }
+
+        if (platform == ModPlatform.CURSEFORGE) {
             ProgressDialog<Object> dialog = new ProgressDialog<>(
                     // #. {0} is the platform were checking for updates (e.g. CurseForge/Modrinth)
                     GetText.tr("Checking For Update On {0}", "CurseForge"), 0,
@@ -442,8 +453,7 @@ public class DisableableMod implements Serializable {
                     instanceOrServer,
                     curseForgeFileId, update.right());
             curseForgeProjectFileSelectorDialog.setVisible(true);
-        } else if (platform == ModPlatform.MODRINTH || ((platform == null && isFromModrinth())
-                && (!isFromCurseForge() || App.settings.defaultModPlatform == ModPlatform.MODRINTH))) {
+        } else if (platform == ModPlatform.MODRINTH) {
             ProgressDialog<Pair<ModrinthProject, List<ModrinthVersion>>> dialog = new ProgressDialog<>(
                     // #. {0} is the platform were checking for updates (e.g. CurseForge/Modrinth)
                     GetText.tr("Checking For Update On {0}", "Modrinth"), 0,
@@ -451,46 +461,11 @@ public class DisableableMod implements Serializable {
                     GetText.tr("Checking For Update On {0}", "Modrinth"), "Cancelled checking for update on Modrinth",
                     parent);
             dialog.addThread(new Thread(() -> {
-                List<String> neoForgeForgeCompatabilityVersions = ConfigManager
-                        .getConfigItem("loaders.neoforge.forgeCompatibleMinecraftVersions", new ArrayList<>());
-
-                // an installed version stored without loaders is looked up by its ID among the project's versions
-                List<ModrinthVersion> projectVersions = hasTags(modrinthVersion.loaders) ? null
-                        : ModrinthApi.getVersions(modrinthProject.id);
-                SinytraConnector.InstalledPath installedPath = modrinthInstalledPath(instanceOrServer, projectVersions,
-                        neoForgeForgeCompatabilityVersions);
-
-                if (installedPath == SinytraConnector.InstalledPath.UNKNOWN) {
-                    LogManager.warn("Not checking " + name + " for updates: its installed version's loader is unknown");
-                    dialog.setReturnValue(null);
-                    dialog.close();
-                    return;
-                }
-
-                ModrinthProject mod = ModrinthApi.getProject(modrinthProject.id);
-                // the loader's own query leaves out the Fabric files a Connector install updates to
-                List<ModrinthVersion> versions = ModrinthApi.getVersions(modrinthProject.id,
-                        instanceOrServer.getMinecraftVersion(),
-                        installedPath == SinytraConnector.InstalledPath.CONNECTOR ? null
-                                : instanceOrServer.getLoaderVersion());
-
-                if (versions == null) {
-                    dialog.setReturnValue(null);
-                    dialog.close();
-                    return;
-                }
-
                 // the selector gets only these, so it can't switch the loader path either
-                versions = modrinthUpdateCandidates(instanceOrServer, versions, installedPath,
-                        neoForgeForgeCompatabilityVersions);
+                List<ModrinthVersion> versions = fetchModrinthUpdateCandidates(instanceOrServer);
 
-                if (!hasModrinthUpdate(instanceOrServer, versions)) {
-                    dialog.setReturnValue(null);
-                    dialog.close();
-                    return;
-                }
-
-                dialog.setReturnValue(new Pair<>(mod, versions));
+                dialog.setReturnValue(versions == null || versions.isEmpty() ? null
+                        : new Pair<>(ModrinthApi.getProject(modrinthProject.id), versions));
                 dialog.close();
             }));
             dialog.start();
@@ -507,6 +482,99 @@ public class DisableableMod implements Serializable {
         }
 
         return true;
+    }
+
+    // the platform Check For Updates uses for a mod from both: the default mod platform setting decides
+    private ModPlatform defaultUpdatePlatform() {
+        if (isFromCurseForge() && (!isFromModrinth() || App.settings.defaultModPlatform == ModPlatform.CURSEFORGE)) {
+            return ModPlatform.CURSEFORGE;
+        }
+
+        if (isFromModrinth() && (!isFromCurseForge() || App.settings.defaultModPlatform == ModPlatform.MODRINTH)) {
+            return ModPlatform.MODRINTH;
+        }
+
+        return null;
+    }
+
+    /**
+     * Whether Check For Updates would find an update, without showing anything: same platform, version restriction and
+     * loader-path rules. UNKNOWN when a request fails or the installed file's loader can't be established. Makes
+     * network requests, so call it off the event dispatch thread.
+     */
+    public UpdateStatus fetchUpdateStatus(ModManagement instanceOrServer) {
+        ModPlatform platform = defaultUpdatePlatform();
+
+        if (platform == ModPlatform.CURSEFORGE) {
+            List<CurseForgeFile> curseForgeFiles = CurseForgeApi.getFilesForProject(curseForgeProjectId);
+
+            if (curseForgeFiles == null) {
+                return UpdateStatus.UNKNOWN;
+            }
+
+            CurseForgeProjectFileSelectorDialog.markMissingTagsAsUntagged(curseForgeFiles);
+
+            List<String> neoForgeForgeCompatabilityVersions = ConfigManager
+                    .getConfigItem("loaders.neoforge.forgeCompatibleMinecraftVersions", new ArrayList<>());
+
+            if (curseForgeInstalledPath(instanceOrServer, curseForgeFiles,
+                    neoForgeForgeCompatabilityVersions) == SinytraConnector.InstalledPath.UNKNOWN) {
+                return UpdateStatus.UNKNOWN;
+            }
+
+            return hasCurseForgeUpdate(instanceOrServer, curseForgeFiles,
+                    curseForgeUpdateCandidate(instanceOrServer, curseForgeFiles, neoForgeForgeCompatabilityVersions))
+                            ? UpdateStatus.AVAILABLE
+                            : UpdateStatus.UP_TO_DATE;
+        }
+
+        if (platform == ModPlatform.MODRINTH) {
+            List<ModrinthVersion> versions = fetchModrinthUpdateCandidates(instanceOrServer);
+
+            if (versions == null) {
+                return UpdateStatus.UNKNOWN;
+            }
+
+            return versions.isEmpty() ? UpdateStatus.UP_TO_DATE : UpdateStatus.AVAILABLE;
+        }
+
+        return UpdateStatus.UNKNOWN;
+    }
+
+    /**
+     * The Modrinth versions an update may offer (those keeping the installed version's loader path), or an empty list
+     * when none is newer than the installed one. Null when it can't be checked: a request failed or the installed
+     * version's loader is unknown.
+     */
+    List<ModrinthVersion> fetchModrinthUpdateCandidates(ModManagement instanceOrServer) {
+        List<String> neoForgeForgeCompatabilityVersions = ConfigManager
+                .getConfigItem("loaders.neoforge.forgeCompatibleMinecraftVersions", new ArrayList<>());
+
+        // an installed version stored without loaders is looked up by its ID among the project's versions
+        List<ModrinthVersion> projectVersions = hasTags(modrinthVersion.loaders) ? null
+                : ModrinthApi.getVersions(modrinthProject.id);
+        SinytraConnector.InstalledPath installedPath = modrinthInstalledPath(instanceOrServer, projectVersions,
+                neoForgeForgeCompatabilityVersions);
+
+        if (installedPath == SinytraConnector.InstalledPath.UNKNOWN) {
+            LogManager.warn("Not checking " + name + " for updates: its installed version's loader is unknown");
+            return null;
+        }
+
+        // the loader's own query leaves out the Fabric files a Connector install updates to
+        List<ModrinthVersion> versions = ModrinthApi.getVersions(modrinthProject.id,
+                instanceOrServer.getMinecraftVersion(),
+                installedPath == SinytraConnector.InstalledPath.CONNECTOR ? null
+                        : instanceOrServer.getLoaderVersion());
+
+        if (versions == null) {
+            return null;
+        }
+
+        versions = modrinthUpdateCandidates(instanceOrServer, versions, installedPath,
+                neoForgeForgeCompatabilityVersions);
+
+        return hasModrinthUpdate(instanceOrServer, versions) ? versions : Collections.emptyList();
     }
 
     /**
