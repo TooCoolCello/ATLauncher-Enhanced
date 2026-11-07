@@ -112,6 +112,9 @@ Verification:
 - Sort By: Name, Date Added (newest first, from the file's creation time, so updating or
   enabling/disabling a mod counts as adding it again), Update Available. Re-sorting keeps the rows,
   so selections survive. The choice is remembered until the launcher closes.
+- Layout: opens at 1000x700 (capped to the screen), each list has its header above it, and one
+  draggable divider splits Enabled and Disabled (both grow equally with the window). Refresh rescans
+  the mod folders (`scanMissingMods`) and checks every mod for updates again.
 - `gradlew runShared` runs the fork on the installed ATLauncher's data folder
   (`%APPDATA%\ATLauncher`, or `-PatlauncherDir=...`) with launcher self-update off. Close the real
   ATLauncher first. Fork-only settings and instance fields are dropped whenever the real launcher saves.

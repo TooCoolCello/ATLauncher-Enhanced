@@ -21,6 +21,8 @@ import java.awt.BorderLayout;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
+import java.awt.GraphicsEnvironment;
+import java.awt.Rectangle;
 import java.awt.event.ActionEvent;
 import java.awt.event.InputEvent;
 import java.awt.event.ItemEvent;
@@ -155,7 +157,9 @@ public class EditModsDialog extends JDialog {
     }
 
     private void setup() {
-        setSize(550, 450);
+        // bigger by default, but never larger than the screen's usable area (HiDPI scaling shrinks it)
+        Rectangle screen = GraphicsEnvironment.getLocalGraphicsEnvironment().getMaximumWindowBounds();
+        setSize(Math.min(1000, screen.width), Math.min(700, screen.height));
         setMinimumSize(new Dimension(550, 450));
         setLocationRelativeTo(App.launcher.getParent());
         setLayout(new BorderLayout());
@@ -188,13 +192,8 @@ public class EditModsDialog extends JDialog {
     private void setupComponents() {
         Analytics.sendScreenView("Edit Mods Dialog");
 
-        JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT);
-        split.setDividerSize(0);
-        split.setBorder(null);
-        split.setEnabled(false);
-        add(split, BorderLayout.NORTH);
-
         JPanel searchPanel = new JPanel(new WrapLayout());
+        add(searchPanel, BorderLayout.NORTH);
         searchField.putClientProperty("JTextField.placeholderText", GetText.tr("Search"));
         searchField.putClientProperty("JTextField.leadingIcon", new FlatSearchIcon());
         searchField.putClientProperty("JTextField.showClearButton", true);
@@ -230,16 +229,13 @@ public class EditModsDialog extends JDialog {
         });
         searchPanel.add(new JLabel(GetText.tr("Sort By")));
         searchPanel.add(sortBox);
+
+        JButton refreshButton = new JButton(GetText.tr("Refresh"));
+        refreshButton.setToolTipText(GetText.tr("Rescan the mod folders and check for updates again"));
+        refreshButton.addActionListener(e -> refresh());
+        searchPanel.add(refreshButton);
+
         searchPanel.add(updateCheckLabel);
-
-        split.setLeftComponent(searchPanel);
-
-        JSplitPane labels = new JSplitPane();
-        labels.setDividerLocation(275);
-        labels.setDividerSize(0);
-        labels.setBorder(null);
-        labels.setEnabled(false);
-        split.setRightComponent(labels);
 
         JPanel topLeftPanel = new JPanel(new FlowLayout());
 
@@ -255,8 +251,6 @@ public class EditModsDialog extends JDialog {
         });
         topLeftPanel.add(selectAllEnabledModsCheckbox);
 
-        labels.setLeftComponent(topLeftPanel);
-
         JPanel topRightPanel = new JPanel(new FlowLayout());
 
         JLabel topLabelRight = new JLabel(GetText.tr("Disabled Mods"));
@@ -271,15 +265,6 @@ public class EditModsDialog extends JDialog {
         });
         topRightPanel.add(selectAllDisabledModsCheckbox);
 
-        labels.setRightComponent(topRightPanel);
-
-        JSplitPane modsInPack = new JSplitPane();
-        modsInPack.setDividerLocation(275);
-        modsInPack.setDividerSize(0);
-        modsInPack.setBorder(null);
-        modsInPack.setEnabled(false);
-        add(modsInPack, BorderLayout.CENTER);
-
         disabledModsPanel = new JPanel();
         disabledModsPanel.setLayout(new BoxLayout(disabledModsPanel, BoxLayout.Y_AXIS));
         disabledModsPanel.setBackground(UIManager.getColor("Mods.modSelectionColor"));
@@ -289,7 +274,10 @@ public class EditModsDialog extends JDialog {
             JScrollPane.VERTICAL_SCROLLBAR_ALWAYS,
             JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
         scroller1.getVerticalScrollBar().setUnitIncrement(16);
-        modsInPack.setRightComponent(new JLayer<>(scroller1, new WheelScrollLayerUI()));
+
+        JPanel disabledColumn = new JPanel(new BorderLayout());
+        disabledColumn.add(topRightPanel, BorderLayout.NORTH);
+        disabledColumn.add(new JLayer<>(scroller1, new WheelScrollLayerUI()), BorderLayout.CENTER);
 
         enabledModsPanel = new JPanel();
         enabledModsPanel.setLayout(new BoxLayout(enabledModsPanel, BoxLayout.Y_AXIS));
@@ -300,7 +288,17 @@ public class EditModsDialog extends JDialog {
             JScrollPane.VERTICAL_SCROLLBAR_ALWAYS,
             JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
         scroller2.getVerticalScrollBar().setUnitIncrement(16);
-        modsInPack.setLeftComponent(new JLayer<>(scroller2, new WheelScrollLayerUI()));
+
+        JPanel enabledColumn = new JPanel(new BorderLayout());
+        enabledColumn.add(topLeftPanel, BorderLayout.NORTH);
+        enabledColumn.add(new JLayer<>(scroller2, new WheelScrollLayerUI()), BorderLayout.CENTER);
+
+        // drag the divider to resize the two lists; resizing the window grows both equally
+        JSplitPane modsInPack = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, enabledColumn, disabledColumn);
+        modsInPack.setResizeWeight(0.5);
+        modsInPack.setContinuousLayout(true);
+        modsInPack.setBorder(null);
+        add(modsInPack, BorderLayout.CENTER);
 
         JPanel bottomPanel = new JPanel(new WrapLayout());
         add(bottomPanel, BorderLayout.SOUTH);
@@ -1032,6 +1030,18 @@ public class EditModsDialog extends JDialog {
         }));
         dialog.start();
 
+        reloadPanels();
+    }
+
+    // picks up mod files added or removed outside the launcher, then checks every mod for updates again
+    private void refresh() {
+        if (updateChecker != null) {
+            updateChecker.shutdownNow();
+            updateChecker = null;
+        }
+        updateStatuses.clear();
+
+        instanceOrServer.scanMissingMods(this);
         reloadPanels();
     }
 
