@@ -84,7 +84,7 @@ public final class CompatibilityBadge extends JLabel {
         return verdict == null ? null : verdict.state;
     }
 
-    static String label(ModCompatibility.State state) {
+    public static String label(ModCompatibility.State state) {
         switch (state) {
             case COMPATIBLE:
                 return GetText.tr("Compatible");
@@ -99,7 +99,7 @@ public final class CompatibilityBadge extends JLabel {
         }
     }
 
-    static Icon icon(ModCompatibility.State state) {
+    public static Icon icon(ModCompatibility.State state) {
         return state == ModCompatibility.State.VIA_CONNECTOR ? CONNECTOR : new StateIcon(state);
     }
 

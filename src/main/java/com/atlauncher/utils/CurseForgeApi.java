@@ -133,6 +133,20 @@ public class CurseForgeApi {
         return null;
     }
 
+    /**
+     * An author's most popular projects of a class, such as mods. Null when the request fails.
+     */
+    public static List<CurseForgeProject> searchByAuthor(int authorId, int classId, int pageSize) {
+        String url = String.format(Locale.ENGLISH,
+                "%s/mods/search?gameId=432&classId=%d&authorId=%d&sortField=Popularity&sortOrder=desc&pageSize=%d",
+                Constants.CURSEFORGE_CORE_API_URL, classId, authorId, pageSize);
+
+        java.lang.reflect.Type type = new TypeToken<CurseForgeCoreApiResponse<List<CurseForgeProject>>>() {}.getType();
+
+        return dataOf(NetworkClient.getCached(url, REQUEST_HEADERS, type,
+                new CacheControl.Builder().maxStale(10, TimeUnit.MINUTES).build()));
+    }
+
     private static List<CurseForgeProject> dataOf(CurseForgeCoreApiResponse<List<CurseForgeProject>> response) {
         return response == null ? null : response.data;
     }

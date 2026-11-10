@@ -123,8 +123,11 @@ public final class ModCompatibilityChecker {
         }
     }
 
-    // takes the next request slot and sleeps until it comes round
-    static void waitForTurn() throws InterruptedException {
+    /**
+     * Takes the next Modrinth request slot and sleeps until it comes round. Shared by everything that sends Modrinth
+     * requests in bulk, so together they stay under its rate limit.
+     */
+    public static void waitForTurn() throws InterruptedException {
         long wait;
         synchronized (ModCompatibilityChecker.class) {
             long now = System.currentTimeMillis();

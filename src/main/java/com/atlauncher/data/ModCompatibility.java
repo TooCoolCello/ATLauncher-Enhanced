@@ -191,7 +191,7 @@ public final class ModCompatibility {
                 .collect(Collectors.toList());
     }
 
-    private static List<String> curseForgeLoaderTags(int modLoader) {
+    static List<String> curseForgeLoaderTags(int modLoader) {
         switch (modLoader) {
             case Constants.CURSEFORGE_FORGE_MODLOADER_ID:
                 return Collections.singletonList("forge");
