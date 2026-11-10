@@ -494,6 +494,18 @@ public class EditModsDialog extends JDialog {
     }
 
     /**
+     * The rows a row's right-click menu acts on: every selected row in both lists when the clicked row is selected,
+     * else just that row.
+     */
+    public List<ModsJCheckBox> rowsForMenu(ModsJCheckBox clicked) {
+        if (!clicked.isSelected()) {
+            return Collections.singletonList(clicked);
+        }
+
+        return rows().filter(AbstractButton::isSelected).collect(Collectors.toList());
+    }
+
+    /**
      * Orders the rows and refills the panels with them. The rows themselves are kept, so a re-sort doesn't lose the
      * selection.
      */

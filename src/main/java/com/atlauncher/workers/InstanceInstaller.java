@@ -144,6 +144,7 @@ import com.atlauncher.utils.Hashing;
 import com.atlauncher.utils.Java;
 import com.atlauncher.utils.ModrinthApi;
 import com.atlauncher.utils.OS;
+import com.atlauncher.utils.OptionsTxt;
 import com.atlauncher.utils.Pair;
 import com.atlauncher.utils.TechnicApi;
 import com.atlauncher.utils.Utils;
@@ -396,6 +397,11 @@ public class InstanceInstaller extends SwingWorker<Boolean, Void> implements Net
                     && (this.loaderVersion == null
                             || (!this.loaderVersion.isPaper() && !this.loaderVersion.isPurpur()))) {
                 initServerSettings();
+            }
+
+            // new client instances only: a reinstall or update keeps the options the player already has
+            if (!this.isServer && !this.isReinstall) {
+                applyDefaultGameOptions();
             }
 
             if (!this.isServer) {
@@ -2419,6 +2425,17 @@ public class InstanceInstaller extends SwingWorker<Boolean, Void> implements Net
             if (binPath.toFile().exists() && binPath.toFile().listFiles().length == 0) {
                 FileUtils.deleteDirectory(binPath);
             }
+        }
+    }
+
+    // the default game options from settings, merged into whatever options.txt the pack shipped
+    private void applyDefaultGameOptions() {
+        try {
+            OptionsTxt.applyDefaults(this.root, App.settings.defaultGameOptions,
+                    this.minecraftVersion == null ? null : this.minecraftVersion.releaseTime);
+        } catch (IOException e) {
+            // not worth failing the install over
+            LogManager.logStackTrace("Failed to apply the default game options", e);
         }
     }
 

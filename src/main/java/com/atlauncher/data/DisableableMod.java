@@ -99,6 +99,9 @@ public class DisableableMod implements Serializable {
     public ModrinthProject modrinthProject;
     public ModrinthVersion modrinthVersion;
 
+    // the side set by hand in Edit Mods; null is Auto. Fork-only, so upstream ATLauncher saving instance.json drops it
+    public ModSide side;
+
     public DisableableMod(String name, String version, boolean optional, String file, String path, Type type,
             Color colour, String description, boolean disabled, boolean userAdded, boolean wasSelected, boolean skipped,
             Integer curseForgeModId, Integer curseForgeFileId, CurseForgeProject curseForgeProject,
@@ -244,6 +247,44 @@ public class DisableableMod implements Serializable {
 
     public boolean isFromModrinth() {
         return this.modrinthProject != null && this.modrinthVersion != null;
+    }
+
+    /**
+     * Where this mod is needed, for code that treats clients and servers differently (exports, server sync): the
+     * side set by hand in Edit Mods, else {@link #getPlatformSide()}. Null when nobody knows; callers should treat
+     * that like {@link ModSide#BOTH}, so a mod is never left out on a guess. For example, a server sync skips a mod
+     * only when this is {@link ModSide#CLIENT}.
+     */
+    public ModSide getEffectiveSide() {
+        return this.side != null ? this.side : getPlatformSide();
+    }
+
+    /**
+     * The side Modrinth gives (the project's client_side/server_side), else CurseForge (the file's Client/Server
+     * environment tags), else null. Stored metadata only, so it never hits the network.
+     */
+    public ModSide getPlatformSide() {
+        ModSide fromModrinth = this.modrinthProject == null ? null
+                : ModSide.fromModrinth(this.modrinthProject.clientSide, this.modrinthProject.serverSide);
+        if (fromModrinth != null) {
+            return fromModrinth;
+        }
+
+        return this.curseForgeFile == null ? null : ModSide.fromCurseForge(this.curseForgeFile.gameVersions);
+    }
+
+    /**
+     * The side set by hand on any of these mods matching the given CurseForge or Modrinth project, so a new file for
+     * that project (an update or reinstall replaces the entry) keeps it.
+     */
+    public static ModSide manualSideOf(List<DisableableMod> mods, Integer curseForgeProjectId,
+            String modrinthProjectId) {
+        return mods.stream()
+                .filter(mod -> mod.side != null)
+                .filter(mod -> (curseForgeProjectId != null && curseForgeProjectId.equals(mod.curseForgeProjectId))
+                        || (modrinthProjectId != null && mod.modrinthProject != null
+                                && modrinthProjectId.equalsIgnoreCase(mod.modrinthProject.id)))
+                .map(mod -> mod.side).findFirst().orElse(null);
     }
 
     public String getFilename() {
