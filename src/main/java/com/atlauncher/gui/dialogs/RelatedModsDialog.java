@@ -40,9 +40,7 @@ import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
-import javax.swing.JMenuItem;
 import javax.swing.JPanel;
-import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
 import javax.swing.JTabbedPane;
 import javax.swing.KeyStroke;
@@ -91,18 +89,9 @@ public final class RelatedModsDialog extends JDialog {
     private final JTabbedPane tabs = new JTabbedPane();
 
     /**
-     * Adds "Related..." to a result's right-click menu, wherever on it the click lands.
+     * Has a result's right-click menu open wherever on it the click lands, such as its buttons or description.
      */
-    static void offer(JComponent card, Runnable open) {
-        JPopupMenu menu = new JPopupMenu();
-        JMenuItem related = new JMenuItem(GetText.tr("Related..."));
-        related.addActionListener(e -> open.run());
-        menu.add(related);
-        card.setComponentPopupMenu(menu);
-        inheritPopup(card);
-    }
-
-    private static void inheritPopup(Container container) {
+    static void inheritPopup(Container container) {
         for (Component child : container.getComponents()) {
             if (child instanceof JComponent) {
                 ((JComponent) child).setInheritsPopupMenu(true);
@@ -407,7 +396,7 @@ public final class RelatedModsDialog extends JDialog {
         for (CurseForgeProject found : projects) {
             String sectionValue = CollectionsLibrary.curseForgeSection(found);
             // only what Add Mods would offer here, as Collections shows them
-            if (CollectionsLibrary.curseForgeOffers(sectionValue, instanceOrServer)) {
+            if (CollectionsLibrary.offers(sectionValue, instanceOrServer)) {
                 shown.add(addMods.curseForgeCard(found, sectionValue, view, this));
             }
         }

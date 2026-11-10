@@ -55,6 +55,7 @@ import javax.swing.event.HyperlinkEvent;
 import org.mini2Dx.gettext.GetText;
 
 import com.atlauncher.App;
+import com.atlauncher.FileSystem;
 import com.atlauncher.builders.HTMLBuilder;
 import com.atlauncher.constants.Constants;
 import com.atlauncher.data.AddModRestriction;
@@ -89,6 +90,7 @@ import com.atlauncher.managers.LogManager;
 import com.atlauncher.managers.MinecraftManager;
 import com.atlauncher.network.Analytics;
 import com.atlauncher.network.analytics.AnalyticsEvent;
+import com.atlauncher.utils.CollectionsLibrary;
 import com.atlauncher.utils.ComboItem;
 import com.atlauncher.utils.CurseForgeApi;
 import com.atlauncher.utils.ModrinthApi;
@@ -107,6 +109,11 @@ public final class AddModsDialog extends JDialog {
     private final JTextField searchField = new JTextField(16);
     // the local collections library, from either provider's tab
     private final JButton collectionsButton = new JButton(GetText.tr("Collections..."));
+    // read when first wanted; Collections and every result's right-click menu share it
+    private CollectionsLibrary collections;
+    // shows a change made from a result's menu in Collections, while it's open
+    Runnable collectionsChanged = () -> {
+    };
     private final JButton fromModpackButton = new JButton(GetText.tr("From Modpack..."));
     private final JLabel platformMessageLabel = new JLabel();
     private final JComboBox<ComboItem<ModPlatform>> hostComboBox = new JComboBox<>();
@@ -1273,14 +1280,25 @@ public final class AddModsDialog extends JDialog {
         // settled by the search result's latest-file index, with no request
         card.compatibility().setVerdict(ModCompatibility.forCurseForgeProject(
                 ModCompatibility.Target.of(instanceOrServer), sectionValue, castMod));
-        if (sectionValue.equals("Mods")) {
-            RelatedModsDialog.offer(card, () -> {
-                RelatedModsDialog.open(parent, this, instanceOrServer, castMod);
-                // whatever was added there, by any of its routes, shows as installed here
-                refreshInstalled();
-            });
-        }
+        Runnable related = !sectionValue.equals("Mods") ? null : () -> {
+            RelatedModsDialog.open(parent, this, instanceOrServer, castMod);
+            // whatever was added there, by any of its routes, shows as installed here
+            refreshInstalled();
+        };
+        CollectionsDialog.offerMenu(card, this::collections, new CollectionsLibrary.Item(ModPlatform.CURSEFORGE,
+                String.valueOf(castMod.id), sectionValue, castMod.name), parent, related,
+                () -> collectionsChanged.run());
         return card;
+    }
+
+    /**
+     * The collections library, read the first time it's wanted.
+     */
+    CollectionsLibrary collections() {
+        if (collections == null) {
+            collections = new CollectionsLibrary(FileSystem.COLLECTIONS, FileSystem.MODRINTH_COLLECTIONS);
+        }
+        return collections;
     }
 
     private void setModrinthMods(List<ModrinthSearchHit> hits, boolean hasNext) {
@@ -1427,13 +1445,13 @@ public final class AddModsDialog extends JDialog {
                         applyCompatibilityFilter();
                     }
                 })));
-        if (sectionValue.equals("Mods")) {
-            RelatedModsDialog.offer(card, () -> {
-                RelatedModsDialog.open(parent, this, instanceOrServer, castMod);
-                // whatever was added there, by any of its routes, shows as installed here
-                refreshInstalled();
-            });
-        }
+        Runnable related = !sectionValue.equals("Mods") ? null : () -> {
+            RelatedModsDialog.open(parent, this, instanceOrServer, castMod);
+            // whatever was added there, by any of its routes, shows as installed here
+            refreshInstalled();
+        };
+        CollectionsDialog.offerMenu(card, this::collections, new CollectionsLibrary.Item(ModPlatform.MODRINTH,
+                castMod.projectId, sectionValue, castMod.title), parent, related, () -> collectionsChanged.run());
         return card;
     }
 

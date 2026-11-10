@@ -212,6 +212,10 @@ public final class CollectionsLibrary {
                 if (collection != null && collection.id != null && LOCAL_ID.matcher(collection.id).matches()
                     && ids.add(collection.id)) {
                     collection.items = validItems(collection.items);
+                    // one with no name is still shown, and can be renamed
+                    if (collection.name == null || collection.name.trim().isEmpty()) {
+                        collection.name = collection.id;
+                    }
                     collections.add(collection);
                 }
             }
@@ -245,11 +249,42 @@ public final class CollectionsLibrary {
         return Collections.unmodifiableList(modrinthCollections);
     }
 
-    // --- the launcher's own collections: groundwork, not yet offered in the launcher
+    // --- the launcher's own collections: Favorites and the user's, changed from Add Mods and Collections
+
+    /**
+     * Favorites, or one of the user's own collections; null when there's none with this ID.
+     */
+    public LocalCollection find(String id) {
+        if (FAVORITES_ID.equals(id)) {
+            return favorites;
+        }
+        return collections.stream().filter(collection -> collection.id.equals(id)).findFirst().orElse(null);
+    }
+
+    private LocalCollection existing(String id) {
+        LocalCollection collection = find(id);
+        if (collection == null) {
+            throw new IllegalArgumentException("no collection " + id);
+        }
+        return collection;
+    }
+
+    private static int indexOf(LocalCollection collection, String key) {
+        for (int i = 0; i < collection.items.size(); i++) {
+            if (collection.items.get(i).key().equals(key)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    public boolean contains(String collectionId, ModPlatform provider, String projectId) {
+        LocalCollection collection = find(collectionId);
+        return collection != null && indexOf(collection, key(provider, projectId)) >= 0;
+    }
 
     public boolean isFavorite(ModPlatform provider, String projectId) {
-        String key = key(provider, projectId);
-        return favorites.items.stream().anyMatch(item -> item.key().equals(key));
+        return contains(FAVORITES_ID, provider, projectId);
     }
 
     /**
@@ -258,39 +293,122 @@ public final class CollectionsLibrary {
      * @return false when it's already there
      */
     public boolean addFavorite(Item item) throws IOException {
-        if (item == null || !item.isValid()) {
-            throw new IllegalArgumentException("not a project");
-        }
-        if (isFavorite(item.provider, item.projectId)) {
-            return false;
-        }
-
-        favorites.items.add(item);
-        write();
-        return true;
+        return addTo(FAVORITES_ID, item);
     }
 
     public boolean removeFavorite(ModPlatform provider, String projectId) throws IOException {
-        String key = key(provider, projectId);
-        if (!favorites.items.removeIf(item -> item.key().equals(key))) {
+        return removeFrom(FAVORITES_ID, provider, projectId);
+    }
+
+    /**
+     * Adds a project to Favorites or one of the user's collections, once. A section Add Mods doesn't have isn't kept.
+     *
+     * @return false when it's already there
+     */
+    public boolean addTo(String collectionId, Item item) throws IOException {
+        if (item == null || !item.isValid()) {
+            throw new IllegalArgumentException("not a project");
+        }
+        LocalCollection collection = existing(collectionId);
+        if (indexOf(collection, item.key()) >= 0) {
             return false;
         }
 
-        write();
+        // a copy, so no two collections share one
+        Item added = new Item(item.provider, item.projectId, SECTIONS.contains(item.section) ? item.section : null,
+            item.name);
+        collection.items.add(added);
+        writeOrUndo(() -> collection.items.remove(added));
         return true;
     }
 
+    /**
+     * @return false when it isn't there
+     */
+    public boolean removeFrom(String collectionId, ModPlatform provider, String projectId) throws IOException {
+        LocalCollection collection = existing(collectionId);
+        int index = indexOf(collection, key(provider, projectId));
+        if (index < 0) {
+            return false;
+        }
+
+        Item removed = collection.items.remove(index);
+        writeOrUndo(() -> collection.items.add(index, removed));
+        return true;
+    }
+
+    /**
+     * Why a collection can't have this name, or null when it can. Names are trimmed, never empty, and never one
+     * already used, Favorites' included, whatever its case.
+     *
+     * @param exceptId the collection being renamed, whose own name doesn't count; null for a new one
+     */
+    public String nameProblem(String name, String exceptId) {
+        String trimmed = name == null ? "" : name.trim();
+        if (trimmed.isEmpty()) {
+            return GetText.tr("A collection needs a name.");
+        }
+        boolean taken = trimmed.equalsIgnoreCase(favorites.name) || collections.stream()
+            .anyMatch(collection -> !collection.id.equals(exceptId) && trimmed.equalsIgnoreCase(collection.name));
+        return taken ? GetText.tr("There's already a collection called {0}.", trimmed) : null;
+    }
+
+    /**
+     * @throws IllegalArgumentException for a name {@link #nameProblem} rejects
+     */
     public LocalCollection createCollection(String name) throws IOException {
-        if (name == null || name.trim().isEmpty()) {
-            throw new IllegalArgumentException("no name");
+        String problem = nameProblem(name, null);
+        if (problem != null) {
+            throw new IllegalArgumentException(problem);
         }
 
         LocalCollection collection = new LocalCollection();
         collection.id = UUID.randomUUID().toString();
         collection.name = name.trim();
         collections.add(collection);
-        write();
+        writeOrUndo(() -> collections.remove(collection));
         return collection;
+    }
+
+    /**
+     * Renames one of the user's collections; Favorites keeps its name.
+     *
+     * @throws IllegalArgumentException for Favorites, a collection that isn't there, or a name {@link #nameProblem}
+     *                                  rejects
+     */
+    public void renameCollection(String id, String name) throws IOException {
+        LocalCollection collection = existing(id);
+        if (collection == favorites) {
+            throw new IllegalArgumentException("Favorites can't be renamed");
+        }
+        String problem = nameProblem(name, id);
+        if (problem != null) {
+            throw new IllegalArgumentException(problem);
+        }
+
+        String before = collection.name;
+        collection.name = name.trim();
+        writeOrUndo(() -> collection.name = before);
+    }
+
+    /**
+     * Deletes one of the user's collections; Favorites can't be. Nothing installed is changed.
+     *
+     * @return false when it isn't there
+     */
+    public boolean deleteCollection(String id) throws IOException {
+        if (FAVORITES_ID.equals(id)) {
+            throw new IllegalArgumentException("Favorites can't be deleted");
+        }
+        LocalCollection collection = find(id);
+        if (collection == null) {
+            return false;
+        }
+
+        int index = collections.indexOf(collection);
+        collections.remove(index);
+        writeOrUndo(() -> collections.add(index, collection));
+        return true;
     }
 
     // --- saved Modrinth collections
@@ -310,19 +428,32 @@ public final class CollectionsLibrary {
             throw new IllegalArgumentException("collection " + lookup.id + " wasn't found");
         }
 
-        Saved collection = findModrinth(lookup.id);
-        boolean added = collection == null;
-        if (added) {
-            collection = new Saved();
-            collection.id = lookup.id;
+        Saved existing = findModrinth(lookup.id);
+        if (existing != null) {
+            Runnable undo = restorer(existing);
+            existing.describe(lookup.collection);
+            writeOrUndo(undo);
+            return existing;
         }
-        collection.describe(lookup.collection);
 
-        if (added) {
-            modrinthCollections.add(collection);
-        }
-        write();
+        Saved collection = new Saved();
+        collection.id = lookup.id;
+        collection.describe(lookup.collection);
+        modrinthCollections.add(collection);
+        writeOrUndo(() -> modrinthCollections.remove(collection));
         return collection;
+    }
+
+    // puts back what's shown for a saved collection now
+    private static Runnable restorer(Saved collection) {
+        String name = collection.name;
+        String description = collection.description;
+        int projectCount = collection.projectCount;
+        return () -> {
+            collection.name = name;
+            collection.description = description;
+            collection.projectCount = projectCount;
+        };
     }
 
     /**
@@ -335,8 +466,9 @@ public final class CollectionsLibrary {
             return false;
         }
 
+        Runnable undo = restorer(collection);
         collection.describe(lookup.collection);
-        write();
+        writeOrUndo(undo);
         return true;
     }
 
@@ -349,9 +481,20 @@ public final class CollectionsLibrary {
             return false;
         }
 
-        modrinthCollections.remove(collection);
-        write();
+        int index = modrinthCollections.indexOf(collection);
+        modrinthCollections.remove(index);
+        writeOrUndo(() -> modrinthCollections.add(index, collection));
         return true;
+    }
+
+    // a change already made in memory is undone when it can't be written, so memory and the file never differ
+    private void writeOrUndo(Runnable undo) throws IOException {
+        try {
+            write();
+        } catch (IOException | RuntimeException e) {
+            undo.run();
+            throw e;
+        }
     }
 
     private void write() throws IOException {
@@ -529,9 +672,9 @@ public final class CollectionsLibrary {
     }
 
     /**
-     * Whether Add Mods offers this section for this instance or server, on CurseForge.
+     * Whether Add Mods offers this section for this instance or server, as it does on either provider.
      */
-    public static boolean curseForgeOffers(String section, ModManagement target) {
+    public static boolean offers(String section, ModManagement target) {
         if (section == null) {
             return false;
         }
