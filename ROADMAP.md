@@ -7,6 +7,7 @@ work extends existing code instead of rebuilding it.
 - Fork remote: `origin` → `TooCoolCello/ATLauncher-Enhanced`
 - Upstream remote: `upstream` → `ATLauncher/ATLauncher`
 - Base branch: `master` (tracks upstream releases; fork work is **not** merged into it)
+- Fork branch: `consolidated` holds every fork feature below in one place. Start new work from it.
 
 Paths below are relative to `src/main/java/com/atlauncher/` unless they start with `src/`.
 
@@ -62,6 +63,24 @@ below, and none is merged into `master` yet.
 | Loader indicators (official NeoForge/Quilt art, with fallbacks) | `feature/add-mods-loader-icons` | `data/LoaderIndicators.java`, `gui/card/LoaderIndicatorStrip.java`, `src/main/resources/assets/image/loader/` (see `ATTRIBUTION.md`) |
 
 Tests for these are under `src/test/java/com/atlauncher/` (same package as each class).
+
+### On `consolidated` (merged 2026-11-10, none tested by hand yet)
+
+| Feature | Where in the UI | Key paths |
+|---|---|---|
+| Collections (Favorites, your own collections, saved Modrinth collections) and a Cards / Compact List / List picker | Add Mods > Collections... | `gui/dialogs/CollectionsDialog.java`, `utils/CollectionsLibrary.java`, `utils/ModrinthCollections.java`, `data/ResultsView.java`, `gui/card/ResultRow.java` |
+| Loader icons in every results view | Add Mods, Collections | `gui/card/LoaderIndicatorStrip.java` (restored after the view rework dropped it) |
+| Evidence-based mod compatibility, contextual Sinytra Connector mark, Hide incompatible | Add Mods results and bottom bar; selector Connector note | `data/ModCompatibility.java`, `data/ModCompatibilityChecker.java` (Modrinth checks spaced 250 ms apart), `gui/card/CompatibilityBadge.java` |
+| Flag / hide incompatible modpacks | Packs tab, "Hide incompatible packs" | `data/PackCompatibility.java`, `gui/card/packbrowser/IncompatiblePackFlag.java`, `gui/tabs/PacksBrowserTab.java` |
+| Default game options (FOV, sensitivity, render distance, GUI scale, auto-jump, master volume) for new instances | Settings > Java/Minecraft; Edit Instance > Apply Default Game Options | `utils/OptionsTxt.java`, `data/DefaultGameOptions.java`, `workers/InstanceInstaller.java` |
+| Client/server side per mod (manual, else Modrinth, else CurseForge) | Edit Mods right-click > Side | `data/ModSide.java`, `DisableableMod.getEffectiveSide()`; used by Modrinth export env and Sync |
+| Remote servers over SFTP (trust-on-first-use host keys, password per session only), link an instance, upload with backups | Servers tab > Remote Servers...; Edit Instance > Link Remote Server / Upload | `data/RemoteServer.java`, `network/sftp/*`, `gui/dialogs/RemoteServer*.java`; library `com.github.mwiede:jsch` |
+| Sync with Server (preview; stops on Minecraft/loader mismatch; skips client-only mods; removals go to `atlauncher-backups/`) | Edit Instance > Sync with ... | `network/sftp/ServerDetection.java`, `ServerSync.java`, `gui/dialogs/ServerSyncDialog.java` |
+| Make an instance from a server (SFTP, folder or server pack zip) | Import Instance > From a Server...; Remote Servers > Make Instance... | `network/sftp/ServerImport.java`, `gui/dialogs/ServerImportDialog.java` |
+| Add mods from someone else's modpack or another instance | Add Mods > From Modpack... | `data/PackMods.java`, `gui/dialogs/PackModsDialog.java` |
+| Related mods (same author, addons search, dependencies) | Right-click a Mods result > Related... | `data/RelatedMods.java`, `gui/dialogs/RelatedModsDialog.java` |
+| Dependency choices (install / keep / replace / skip / enable; incompatible mods; removal checks) | Selectors' Dependencies panel; Edit Mods removal | `data/DependencyChoice.java`, `data/InstalledDependencies.java`, `gui/components/DependencyChoicesPanel.java`, `gui/dialogs/ModRemovalDialog.java` |
+| Zip extraction refuses entries that leave the target folder | every zip import | `utils/ArchiveUtils.java` |
 
 ## 2b. Committed on a fork branch
 
@@ -142,47 +161,20 @@ downloads that jar and runs it on `%APPDATA%\ATLauncher` with ATLauncher's bundl
 
 Nothing at present.
 
+Build note: Gradle 8.12.1 can't run on Java 25. Use JDK 17, for example
+`JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-17.0.18.8-hotspot" ./gradlew test`.
+
 ## 4. Planned
 
-Grouped into phases by dependency. There are no release numbers or dates.
+Phases A–F are built (section 2, "On `consolidated`"). Their user-facing defaults still await the
+user's answers. Known follow-ups:
 
-### Phase A — Finish Sinytra correctness
-- Sinytra selection fix: committed as `dbe6a1c1` (section 2b). If a regression is
-  suspected, manually spot-check the untested native-versus-Fabric cases listed there.
-- Sinytra-aware mod update checks: don't offer a Fabric update in place of a
-  native file, or the reverse, without saying so. Start from `EditModsDialog.java` / `DisableableMod.java`.
-- Later: an honest, contextual Sinytra icon, shown only where a Connector
-  fallback is actually in play (build on `LoaderIndicatorStrip`).
-
-### Phase B — Compatibility filtering
-- Evidence-based compatibility filtering: use file/version data, not
-  project-level loader tags alone.
-- Option to hide incompatible modpacks.
-
-### Phase C — Discovery and organisation
-- Persistent Favorites.
-- User-created collections.
-- Browse and save Modrinth collections across mods, resource packs and data packs.
-- Related-mod discovery.
-- Add compatible mods from other people's modpacks.
-
-### Phase D — Dependency UX
-- Less rigid dependency prompts: keep / remove / replace choices instead of all-or-nothing.
-
-### Phase E — Instance defaults
-- Global default FOV and mouse sensitivity for new instances.
-- Configurable minimum Java heap (`-Xms`), separate from the existing maximum memory setting.
-- Generate a modpack's `defaultconfig` from an existing world's configs.
-- Manual client/server-side metadata per mod.
-
-### Phase F — Servers and sync
-- Import from a server exporter.
-- SFTP server entries.
-- Direct "Upload to SFTP".
-- Link an instance to a remote server.
-- Previewable "Sync with Server" covering server-relevant mods, configs,
-  KubeJS scripts and mod-loader changes. Excludes client-only changes.
-  **Stops** on a Minecraft-version or loader mismatch.
+- Hand-test every feature in section 2's `consolidated` table; none has been clicked through yet.
+- Paper/Purpur servers: Sync and Import report their loader as unknown.
+- Disable Selected in Edit Mods doesn't warn about mods that need what's being disabled (removal does).
+- "Often used together in modpacks" for Related was skipped: the only data would be packs the user opened.
+- Remembering SFTP passwords needs a safe store (Windows DPAPI via jna-platform is one option).
+- Sync/Import pair jars by name, size and hash, not by the mod IDs inside jars (`mods.toml`, `fabric.mod.json`).
 
 ## 5. Needs source verification
 
