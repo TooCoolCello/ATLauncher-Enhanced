@@ -24,6 +24,7 @@ import java.util.function.Predicate;
 import org.mini2Dx.gettext.GetText;
 
 import com.atlauncher.constants.Constants;
+import com.atlauncher.data.minecraft.loaders.LoaderVersion;
 
 /**
  * Where a required dependency of the file being added stands against what's installed. Nothing here installs
@@ -240,6 +241,57 @@ public final class RequiredDependency {
         return (mod.isFromCurseForge() && mod.getCurseForgeModId() == Constants.CURSEFORGE_FORGIFIED_FABRIC_API_MOD_ID)
                 || (mod.isFromModrinth()
                         && Constants.MODRINTH_FORGIFIED_FABRIC_API_MOD_ID.equals(mod.modrinthProject.id));
+    }
+
+    /**
+     * Whether an installed mod provides a Modrinth dependency: the same project, the same library installed from
+     * CurseForge (matched by its CurseForge mod ID), or Quilted Fabric API for Fabric API.
+     */
+    public static boolean providesModrinth(DisableableMod installedMod, String dependencyProjectId) {
+        if (installedMod.isFromCurseForge()) {
+            int modId = installedMod.getCurseForgeModId();
+            if ((Constants.MODRINTH_FABRIC_MOD_ID.equals(dependencyProjectId)
+                    && modId == Constants.CURSEFORGE_FABRIC_MOD_ID)
+                    || (Constants.MODRINTH_LEGACY_FABRIC_MOD_ID.equals(dependencyProjectId)
+                            && modId == Constants.CURSEFORGE_LEGACY_FABRIC_MOD_ID)
+                    || (Constants.MODRINTH_FORGIFIED_FABRIC_API_MOD_ID.equals(dependencyProjectId)
+                            && modId == Constants.CURSEFORGE_FORGIFIED_FABRIC_API_MOD_ID)) {
+                return true;
+            }
+        }
+
+        if (!installedMod.isFromModrinth()) {
+            return false;
+        }
+
+        return installedMod.modrinthProject.id.equals(dependencyProjectId)
+                || (Constants.MODRINTH_FABRIC_MOD_ID.equals(dependencyProjectId)
+                        && Constants.MODRINTH_QSL_MOD_ID.equals(installedMod.modrinthProject.id));
+    }
+
+    /**
+     * Whether an installed mod provides a CurseForge dependency through a known equivalent: Quilted Fabric API for
+     * Fabric API on Quilt, or the same library installed from Modrinth only. The same CurseForge project isn't
+     * checked here.
+     */
+    public static boolean providesCurseForgeAsEquivalent(DisableableMod m, int dependencyModId,
+            LoaderVersion loader) {
+        if (!m.isFromModrinth()) {
+            return false;
+        }
+
+        if (dependencyModId == Constants.CURSEFORGE_FABRIC_MOD_ID && loader != null && loader.isQuilt()
+                && m.modrinthProject.id.equals(Constants.MODRINTH_QSL_MOD_ID)) {
+            return true;
+        }
+
+        return !m.isFromCurseForge()
+                && ((dependencyModId == Constants.CURSEFORGE_FABRIC_MOD_ID
+                        && m.modrinthProject.id.equals(Constants.MODRINTH_FABRIC_MOD_ID))
+                        || (dependencyModId == Constants.CURSEFORGE_LEGACY_FABRIC_MOD_ID
+                                && m.modrinthProject.id.equals(Constants.MODRINTH_LEGACY_FABRIC_MOD_ID))
+                        || (dependencyModId == Constants.CURSEFORGE_FORGIFIED_FABRIC_API_MOD_ID
+                                && m.modrinthProject.id.equals(Constants.MODRINTH_FORGIFIED_FABRIC_API_MOD_ID)));
     }
 
     public static boolean anyInstalled(Collection<DisableableMod> mods, Predicate<DisableableMod> which) {
