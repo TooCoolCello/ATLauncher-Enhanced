@@ -20,12 +20,13 @@ package com.atlauncher.gui.dialogs;
 import java.awt.BorderLayout;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
-import java.awt.GridLayout;
 import java.awt.Window;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -45,8 +46,10 @@ import com.atlauncher.App;
 import com.atlauncher.builders.HTMLBuilder;
 import com.atlauncher.constants.Constants;
 import com.atlauncher.data.AddModRestriction;
+import com.atlauncher.data.DependencyChoice;
 import com.atlauncher.data.DisableableMod;
 import com.atlauncher.data.LoaderChoice;
+import com.atlauncher.data.ModCompatibility;
 import com.atlauncher.data.ModManagement;
 import com.atlauncher.data.RequiredDependency;
 import com.atlauncher.data.SinytraConnector;
@@ -56,12 +59,13 @@ import com.atlauncher.data.curseforge.CurseForgeProject;
 import com.atlauncher.data.minecraft.loaders.LoaderVersion;
 import com.atlauncher.exceptions.InvalidMinecraftVersion;
 import com.atlauncher.gui.card.CompatibilityBadge;
-import com.atlauncher.gui.card.CurseForgeFileDependencyCard;
+import com.atlauncher.gui.components.DependencyChoicesPanel;
 import com.atlauncher.managers.ConfigManager;
 import com.atlauncher.managers.DialogManager;
 import com.atlauncher.managers.LogManager;
 import com.atlauncher.managers.MinecraftManager;
 import com.atlauncher.network.Analytics;
+import com.atlauncher.network.analytics.AnalyticsEvent;
 import com.atlauncher.utils.ComboItem;
 import com.atlauncher.utils.CurseForgeApi;
 import com.atlauncher.utils.OS;
@@ -75,7 +79,7 @@ public class CurseForgeProjectFileSelectorDialog extends JDialog {
     private Predicate<CurseForgeFile> updateCandidate = null;
     private boolean reinstall = false;
 
-    private final JPanel dependenciesPanel = new JPanel(new FlowLayout());
+    private final DependencyChoicesPanel<CurseForgeFile> dependenciesPanel = new DependencyChoicesPanel<>();
     private JScrollPane scrollPane;
     private JButton addButton;
     private JButton viewModButton;
@@ -177,8 +181,7 @@ public class CurseForgeProjectFileSelectorDialog extends JDialog {
         viewFileButton.setEnabled(false);
 
         dependenciesPanel.setVisible(false);
-        dependenciesPanel
-            .setBorder(BorderFactory.createTitledBorder(GetText.tr("The below mods need to be installed")));
+        dependenciesPanel.setBorder(BorderFactory.createTitledBorder(GetText.tr("Dependencies")));
 
         // Top Panel Stuff
         JPanel top = new JPanel(new BorderLayout());
@@ -251,27 +254,38 @@ public class CurseForgeProjectFileSelectorDialog extends JDialog {
                 return;
             }
 
+            // checked again now: choices made against a list that predates a change to the installed mods aren't
+            // carried out
+            if (!dependenciesPanel.matches(checkDependencies(file))) {
+                reloadDependenciesPanel();
+                showDependenciesChanged(this);
+                return;
+            }
+
             List<String> warnings = new ArrayList<>();
             String override = overrideWarning(file);
             if (override != null) {
                 warnings.add(override);
             }
-            // checked again now, not taken from the cards, which may predate a change to the installed mods
-            checkDependencies(file).forEach(check -> warnings.add(check.warning));
+            warnings.addAll(dependenciesPanel.warnings());
             if (!confirmDespiteWarnings(this, file.displayName, warnings)) {
                 return;
             }
 
+            List<String> problems = new ArrayList<>();
             ProgressDialog<Void> progressDialog = new ProgressDialog<>(
                 // #. {0} is the name of the mod we're installing
                 GetText.tr("Installing {0}", file.displayName), false, this);
             progressDialog.addThread(new Thread(() -> {
                 Analytics.trackEvent(mod.getAnalyticsEventForAdded(file));
                 instanceOrServer.addFileFromCurseForge(mod, file, progressDialog);
+                problems.addAll(dependenciesPanel.apply(instanceOrServer, progressDialog,
+                    (item, picked) -> installDependency(item, picked, progressDialog)));
 
                 progressDialog.close();
             }));
             progressDialog.start();
+            DependencyChoicesPanel.showProblems(this, problems);
             dispose();
         });
 
@@ -370,6 +384,16 @@ public class CurseForgeProjectFileSelectorDialog extends JDialog {
             .show() == DialogManager.YES_OPTION;
     }
 
+    /**
+     * Shown when Add finds the dependencies no longer as listed, so the user checks the refreshed choices first.
+     */
+    static void showDependenciesChanged(Window parent) {
+        DialogManager.okDialog().setParent(parent).setTitle(GetText.tr("Dependencies Changed"))
+            .setContent(GetText.tr("The installed mods changed since the dependencies were listed. Check the "
+                + "choices again, then press Add."))
+            .setType(DialogManager.WARNING).show();
+    }
+
     private static String escape(String text) {
         return text == null ? "" : text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
@@ -436,20 +460,10 @@ public class CurseForgeProjectFileSelectorDialog extends JDialog {
         overrideNoteLabel.setVisible(override != null);
 
         dependenciesPanel.setVisible(false);
+        dependenciesPanel.show(checkDependencies(selectedFile));
 
-        List<CurseForgeFileDependencyCard> cards = checkDependencies(selectedFile).stream()
-            .map(check -> new CurseForgeFileDependencyCard(this, check.project, instanceOrServer, check.state,
-                check.status, check.preferConnectorBuilds))
-            .collect(Collectors.toList());
-
-        if (!cards.isEmpty()) {
-            dependenciesPanel.removeAll();
-            cards.forEach(dependenciesPanel::add);
-
-            dependenciesPanel.setLayout(new GridLayout(cards.size() < 2 ? 1 : cards.size() / 2,
-                (cards.size() / 2) + 1));
-
-            setSize(550, 450);
+        if (!dependenciesPanel.isEmpty()) {
+            setSize(650, 480);
             setLocationRelativeTo(App.launcher.getParent());
 
             dependenciesPanel.setVisible(true);
@@ -461,39 +475,48 @@ public class CurseForgeProjectFileSelectorDialog extends JDialog {
         }
     }
 
-    // one unsatisfied required dependency, as checked against what's installed right now
-    private static final class DependencyCheck {
-        private final RequiredDependency.State state;
-        private final CurseForgeProject project;
-        private final String status;
-        private final String warning;
-        private final boolean preferConnectorBuilds;
-
-        private DependencyCheck(RequiredDependency.State state, CurseForgeProject project, String status,
-            String warning, boolean preferConnectorBuilds) {
-            this.state = state;
-            this.project = project;
-            this.status = status;
-            this.warning = warning;
-            this.preferConnectorBuilds = preferConnectorBuilds;
-        }
-    }
-
     /**
-     * The required dependencies of this exact file that aren't satisfied, checked against the installed mods as they
-     * are now. Used for the cards and again when Add is pressed, so an earlier card can't vouch for a dependency
-     * that has since been disabled or removed.
+     * The dependencies of this exact file, checked against the installed mods as they are now: required and optional
+     * ones whether or not they're met, and installed mods it declares incompatible. Checked again when Add is
+     * pressed, so choices made against an older list aren't carried out.
      */
-    private List<DependencyCheck> checkDependencies(CurseForgeFile file) {
+    private List<DependencyChoicesPanel.Item<CurseForgeFile>> checkDependencies(CurseForgeFile file) {
+        List<DependencyChoicesPanel.Item<CurseForgeFile>> items = new ArrayList<>();
+        if (file.dependencies == null) {
+            return items;
+        }
+
         boolean parentNeedsConnector = needsConnector(file);
         boolean connectorActive = instanceOrServer.isForgeLikeAndHasInstalledSinytraConnector();
         List<String> neoForgeForgeCompatabilityVersions = ConfigManager
             .getConfigItem("loaders.neoforge.forgeCompatibleMinecraftVersions", new ArrayList<>());
         List<DisableableMod> mods = instanceOrServer.getMods();
-        List<DependencyCheck> checks = new ArrayList<>();
+        ModCompatibility.Target target = ModCompatibility.Target.of(instanceOrServer);
+
+        // looked up together; Forgified Fabric API stands in for Fabric API under Connector
+        int[] projectIds = file.dependencies.stream()
+            .filter(d -> DependencyChoice.kindOf(d) != null && d.modId != 0)
+            .mapToInt(d -> connectorActive && d.modId == Constants.CURSEFORGE_FABRIC_MOD_ID
+                ? Constants.CURSEFORGE_FORGIFIED_FABRIC_API_MOD_ID
+                : d.modId)
+            .distinct().toArray();
+        Map<Integer, CurseForgeProject> projects = CurseForgeApi.getProjectsAsMap(projectIds);
+        if (projects == null) {
+            projects = new HashMap<>();
+        }
 
         for (CurseForgeFileDependency dependency : file.dependencies) {
-            if (!dependency.isRequired()) {
+            DependencyChoice.Kind kind = DependencyChoice.kindOf(dependency);
+            if (kind == null) {
+                continue;
+            }
+
+            if (kind == DependencyChoice.Kind.INCOMPATIBLE) {
+                mods.stream().filter(m -> m != null && activity(m) == null && m.isFromCurseForge()
+                    && m.getCurseForgeModId() == dependency.modId).forEach(m -> items.add(
+                        new DependencyChoicesPanel.Item<>("incompatible:" + m.file, m.name, kind, null,
+                            // #. {0} is the mod being added
+                            GetText.tr("{0} declares it incompatible.", mod.name), m, false, null)));
                 continue;
             }
 
@@ -508,6 +531,11 @@ public class CurseForgeProjectFileSelectorDialog extends JDialog {
                     RequiredDependency.anyInstalled(mods,
                         m -> RequiredDependency.isFabricApi(m) && RequiredDependency.isPresent(m)),
                     installed != null, activity(installed));
+                if (state == RequiredDependency.State.FABRIC_API_CONFLICT) {
+                    // the row is about the ordinary Fabric API, which Replace takes out
+                    installed = mods.stream().filter(m -> m != null && RequiredDependency.isFabricApi(m)
+                        && RequiredDependency.isPresent(m)).findFirst().orElse(null);
+                }
             } else {
                 // the known equivalents: Fabric API from QSL on Quilt, or the same library from Modrinth
                 DisableableMod equivalent = preferUsable(mods, m -> isKnownEquivalent(dependency, m));
@@ -525,39 +553,87 @@ public class CurseForgeProjectFileSelectorDialog extends JDialog {
                 }
             }
 
-            if (state == RequiredDependency.State.SATISFIED) {
-                continue;
+            CurseForgeProject project = projects.get(
+                viaForgified ? Constants.CURSEFORGE_FORGIFIED_FABRIC_API_MOD_ID : dependency.modId);
+            if (installed == null) {
+                // nothing installed to fall back on, so a project that can't be found can't be installed either
+                state = RequiredDependency.withProject(state, project);
+            }
+            String version = installed == null ? null : installed.version;
+            // another project standing in, such as Quilted Fabric API, or Forgified Fabric API under Connector
+            boolean equivalent = installed != null && (viaForgified || !installed.isFromCurseForge()
+                || installed.getCurseForgeModId() != dependency.modId);
+
+            String status = state == RequiredDependency.State.SATISFIED && installed != null
+                ? DependencyChoice.satisfiedStatus(installed.name, version, equivalent)
+                : RequiredDependency.status(state, parentNeedsConnector, version);
+            String title = project != null ? project.name
+                : installed != null ? installed.name : GetText.tr("Unknown Project");
+            // installing the dependency's own project replaces its entry anyway; anything else has to come out
+            boolean replacesInstalled = installed != null && !(project != null && installed.isFromCurseForge()
+                && installed.getCurseForgeModId() == project.id);
+
+            DependencyChoicesPanel.Item<CurseForgeFile> item = new DependencyChoicesPanel.Item<>(
+                kind + ":" + dependency.modId + ":" + state + ":" + (installed == null ? "" : installed.file),
+                title, kind, state, status, installed, replacesInstalled, project);
+
+            if (project != null) {
+                boolean preferConnector = parentNeedsConnector && !viaForgified;
+                item.picker = () -> pickFile(project, preferConnector, target);
+                item.view = () -> OS.openWebBrowser(project.getWebsiteUrl());
+
+                if (DependencyChoice.actions(kind, state).stream().anyMatch(DependencyChoice.Action::installs)) {
+                    boolean nestedPreferConnector = parentNeedsConnector
+                        && state == RequiredDependency.State.MISSING;
+                    item.choose = () -> {
+                        Analytics.trackEvent(AnalyticsEvent.forAddMod(project));
+                        new CurseForgeProjectFileSelectorDialog(this, project, instanceOrServer, nestedPreferConnector)
+                            .setVisible(true);
+                        reloadDependenciesPanel();
+                    };
+                }
             }
 
-            CurseForgeProject project = CurseForgeApi.getProjectById(
-                viaForgified ? Constants.CURSEFORGE_FORGIFIED_FABRIC_API_MOD_ID : dependency.modId);
-            state = RequiredDependency.withProject(state, project);
-            String version = installed == null ? null : installed.version;
-
-            checks.add(new DependencyCheck(state, project,
-                RequiredDependency.status(state, parentNeedsConnector, version),
-                (project == null ? GetText.tr("Unknown Project") : project.name) + ": "
-                    + RequiredDependency.warning(state, parentNeedsConnector, version),
-                parentNeedsConnector && state == RequiredDependency.State.MISSING));
+            items.add(item);
         }
 
-        return checks;
+        return items;
+    }
+
+    /**
+     * The file a dependency installs by default (see {@link DependencyChoice#pickFile}), or null when none of its
+     * files runs here or CurseForge can't be reached.
+     */
+    private DependencyChoicesPanel.Pick<CurseForgeFile> pickFile(CurseForgeProject dependency,
+        boolean preferConnector, ModCompatibility.Target target) {
+        List<CurseForgeFile> projectFiles = CurseForgeApi.getFilesForProject(dependency.id);
+        if (projectFiles == null) {
+            return null;
+        }
+
+        markMissingTagsAsUntagged(projectFiles);
+        List<CurseForgeFile> newestFirst = projectFiles.stream().filter(f -> f != null)
+            .sorted(Comparator.comparingInt((CurseForgeFile f) -> f.id).reversed()).collect(Collectors.toList());
+        // CurseForge lists a file's loaders among its game versions
+        CurseForgeFile picked = DependencyChoice.pickFile(newestFirst, f -> f.gameVersions, f -> f.gameVersions,
+            f -> f.releaseType == null || f.releaseType == 1, null, target, preferConnector);
+
+        return picked == null ? null : new DependencyChoicesPanel.Pick<>(picked, picked.displayName, null, null);
+    }
+
+    // true when the dependency's chosen file is now installed
+    private boolean installDependency(DependencyChoicesPanel.Item<CurseForgeFile> item, CurseForgeFile picked,
+        ProgressDialog<Void> progressDialog) {
+        CurseForgeProject dependency = (CurseForgeProject) item.project;
+        instanceOrServer.addFileFromCurseForge(dependency, picked, progressDialog);
+
+        return instanceOrServer.getMods().stream().anyMatch(m -> m != null && m.isFromCurseForge()
+            && m.getCurseForgeModId() == dependency.id && m.getCurseForgeFileId() == picked.id);
     }
 
     private boolean isKnownEquivalent(CurseForgeFileDependency dependency, DisableableMod m) {
-        if (dependency.modId == Constants.CURSEFORGE_FABRIC_MOD_ID && instanceOrServer.getLoaderVersion() != null
-            && instanceOrServer.getLoaderVersion().isQuilt() && m.isFromModrinth()
-            && m.modrinthProject.id.equals(Constants.MODRINTH_QSL_MOD_ID)) {
-            return true;
-        }
-
-        return m.isFromModrinth() && !m.isFromCurseForge()
-            && ((dependency.modId == Constants.CURSEFORGE_FABRIC_MOD_ID
-            && m.modrinthProject.id.equals(Constants.MODRINTH_FABRIC_MOD_ID))
-            || (dependency.modId == Constants.CURSEFORGE_LEGACY_FABRIC_MOD_ID
-            && m.modrinthProject.id.equals(Constants.MODRINTH_LEGACY_FABRIC_MOD_ID))
-            || (dependency.modId == Constants.CURSEFORGE_FORGIFIED_FABRIC_API_MOD_ID
-            && m.modrinthProject.id.equals(Constants.MODRINTH_FORGIFIED_FABRIC_API_MOD_ID)));
+        return RequiredDependency.providesCurseForgeAsEquivalent(m, dependency.modId,
+            instanceOrServer.getLoaderVersion());
     }
 
     // the matching installed entry, a usable one if there is one

@@ -176,7 +176,7 @@ public final class DependencyChoice {
      * all in the same ISO 8601 UTC form, so they compare as text.
      */
     public static Boolean isNewer(String date, String than) {
-        return date == null || than == null ? null : date.compareTo(than) > 0;
+        return (date == null || than == null) ? null : date.compareTo(than) > 0;
     }
 
     /**
