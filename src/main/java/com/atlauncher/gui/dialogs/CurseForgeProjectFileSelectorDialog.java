@@ -55,6 +55,7 @@ import com.atlauncher.data.curseforge.CurseForgeFileDependency;
 import com.atlauncher.data.curseforge.CurseForgeProject;
 import com.atlauncher.data.minecraft.loaders.LoaderVersion;
 import com.atlauncher.exceptions.InvalidMinecraftVersion;
+import com.atlauncher.gui.card.CompatibilityBadge;
 import com.atlauncher.gui.card.CurseForgeFileDependencyCard;
 import com.atlauncher.managers.ConfigManager;
 import com.atlauncher.managers.DialogManager;
@@ -210,6 +211,8 @@ public class CurseForgeProjectFileSelectorDialog extends JDialog {
         scrollPane.setPreferredSize(new Dimension(550, 250));
 
         connectorNoteLabel.setForeground(UIManager.getColor("yellow"));
+        // the same Sinytra mark Add Mods shows on results that only run through Connector
+        connectorNoteLabel.setIcon(CompatibilityBadge.connectorIcon());
         connectorNoteLabel.setVisible(false);
 
         loaderPanel.add(new JLabel(GetText.tr("Mod loader") + ": "));

@@ -55,6 +55,7 @@ public final class CurseForgeProjectCard extends JPanel {
     private final JLabel installedLabel = new JLabel(
             Utils.getIconImage(App.THEME.getResourcePath("image", "tick")));
     private final ResultsView view;
+    private final CompatibilityBadge compatibility;
 
     public CurseForgeProjectCard(final CurseForgeProject mod, final ModManagement instanceOrServer,
             ActionListener installAl,
@@ -91,7 +92,10 @@ public final class CurseForgeProjectCard extends JPanel {
         viewButton.addActionListener(e -> OS.openWebBrowser(mod.getWebsiteUrl()));
 
         String author = mod.authors == null || mod.authors.isEmpty() ? null : mod.authors.get(0).name;
-        JPanel loaderStrip = LoaderIndicatorStrip.create(loaders, "CurseForge");
+        // the compatibility mark goes before the reported loaders; shown once Add Mods has a verdict
+        compatibility = new CompatibilityBadge(!view.isRow());
+        JPanel loaderStrip = CompatibilityBadge.withLoaders(compatibility,
+                LoaderIndicatorStrip.create(loaders, "CurseForge"));
 
         if (view.isRow()) {
             ResultRow.layout(this, view == ResultsView.COMPACT_LIST, icon, mod.name, author, mod.summary,
@@ -142,6 +146,13 @@ public final class CurseForgeProjectCard extends JPanel {
 
         add(summaryPanel, BorderLayout.CENTER);
         add(buttonsPanel, BorderLayout.SOUTH);
+    }
+
+    /**
+     * Whether this result has a file for the instance, beside its loader icons.
+     */
+    public CompatibilityBadge compatibility() {
+        return compatibility;
     }
 
     @Override

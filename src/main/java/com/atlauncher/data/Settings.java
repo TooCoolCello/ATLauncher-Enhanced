@@ -112,6 +112,8 @@ public class Settings {
     // each window's own view; null until first used, then set from the one before so nothing changes by itself
     public ResultsView addModsView;
     public ResultsView collectionsView;
+    // hide Add Mods results with no file for the instance; false when missing, as upstream drops it on save
+    public boolean addModsHideIncompatible = false;
     public boolean scanModsOnLaunch = true;
 
     // Java/Minecraft

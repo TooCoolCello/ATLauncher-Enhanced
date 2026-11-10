@@ -24,16 +24,20 @@ import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Window;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
+import java.util.function.BooleanSupplier;
 import java.util.stream.Collectors;
 
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JComponent;
 import javax.swing.JComboBox;
 import javax.swing.JDialog;
@@ -55,6 +59,8 @@ import com.atlauncher.data.AddModRestriction;
 import com.atlauncher.data.DisableableMod;
 import com.atlauncher.data.Instance;
 import com.atlauncher.data.LoaderIndicators;
+import com.atlauncher.data.ModCompatibility;
+import com.atlauncher.data.ModCompatibilityChecker;
 import com.atlauncher.data.ModManagement;
 import com.atlauncher.data.ModPlatform;
 import com.atlauncher.data.ResultsView;
@@ -68,6 +74,7 @@ import com.atlauncher.data.modrinth.ModrinthProject;
 import com.atlauncher.data.modrinth.ModrinthSearchHit;
 import com.atlauncher.data.modrinth.ModrinthSearchResult;
 import com.atlauncher.exceptions.InvalidMinecraftVersion;
+import com.atlauncher.gui.card.CompatibilityBadge;
 import com.atlauncher.gui.card.CurseForgeProjectCard;
 import com.atlauncher.gui.card.ModrinthSearchHitCard;
 import com.atlauncher.gui.components.ResultsViewPicker;
@@ -110,6 +117,12 @@ public final class AddModsDialog extends JDialog {
     private final ResultsViewPicker viewPicker = new ResultsViewPicker(App.settings.addModsView(), this::setViewMode);
     // redraws the results currently shown (EDT only); null while loading or before any results
     private Runnable rerenderResults = null;
+    // fetches Modrinth results' versions for their compatibility marks; what it fetched lasts while this is open
+    private final ModCompatibilityChecker compatibilityChecker = new ModCompatibilityChecker();
+    private final JCheckBox hideIncompatibleCheckBox = new JCheckBox(GetText.tr("Hide incompatible"));
+    private final JLabel hiddenCountLabel = new JLabel();
+    // this page's results with their compatibility marks, for hiding the incompatible ones (EDT only)
+    private final Map<JComponent, CompatibilityBadge> pageResults = new LinkedHashMap<>();
 
     // #. {0} is the loader api (Fabric API/QSL)
     private final JButton installFabricApiButton = new JButton(GetText.tr("Install {0}", "Fabric API"));
@@ -699,6 +712,19 @@ public final class AddModsDialog extends JDialog {
         bottomButtonsPanel.add(new JLabel(GetText.tr("Per page:")));
         bottomButtonsPanel.add(pageSizeComboBox);
 
+        hideIncompatibleCheckBox.setSelected(App.settings.addModsHideIncompatible);
+        hideIncompatibleCheckBox.setToolTipText(GetText.tr("Hide results with no file for this instance's Minecraft "
+                + "version and loader. Results not checked yet, or that couldn't be checked, stay visible."));
+        hideIncompatibleCheckBox.addActionListener(e -> {
+            App.settings.addModsHideIncompatible = hideIncompatibleCheckBox.isSelected();
+            App.settings.save();
+            applyCompatibilityFilter();
+        });
+        hiddenCountLabel.setVisible(false);
+        bottomButtonsPanel.add(Box.createHorizontalStrut(10));
+        bottomButtonsPanel.add(hideIncompatibleCheckBox);
+        bottomButtonsPanel.add(hiddenCountLabel);
+
         platformMessageLabel.setForeground(UIManager.getColor("yellow"));
         bottomPanel.add(platformMessageLabel, BorderLayout.NORTH);
         bottomPanel.add(bottomButtonsPanel, BorderLayout.CENTER);
@@ -786,6 +812,8 @@ public final class AddModsDialog extends JDialog {
     private void setLoading(boolean loading) {
         if (loading) {
             rerenderResults = null;
+            pageResults.clear();
+            hiddenCountLabel.setVisible(false);
             contentPanel.removeAll();
             contentPanel.setLayout(new BorderLayout());
             contentPanel.add(new LoadingPanel(), BorderLayout.CENTER);
@@ -1088,6 +1116,7 @@ public final class AddModsDialog extends JDialog {
     private void setCurseForgeMods(List<CurseForgeProject> mods, boolean hasNext) {
         rerenderResults = () -> setCurseForgeMods(mods, hasNext);
         ResultsView view = App.settings.addModsView();
+        pageResults.clear();
 
         if (mods == null || mods.isEmpty()) {
             contentPanel.removeAll();
@@ -1102,10 +1131,13 @@ public final class AddModsDialog extends JDialog {
                     .orElse("Mods");
             List<JComponent> cards = new ArrayList<>();
             for (CurseForgeProject mod : mods) {
-                cards.add(curseForgeCard(mod, sectionValue, view, this));
+                CurseForgeProjectCard card = curseForgeCard(mod, sectionValue, view, this);
+                pageResults.put(card, card.compatibility());
+                cards.add(card);
             }
             layOutResults(contentPanel, cards, view);
         }
+        applyCompatibilityFilter();
 
         SwingUtilities.invokeLater(() -> jscrollPane.getVerticalScrollBar().setValue(0));
 
@@ -1121,7 +1153,7 @@ public final class AddModsDialog extends JDialog {
      */
     CurseForgeProjectCard curseForgeCard(CurseForgeProject castMod, String sectionValue, ResultsView view,
             Window parent) {
-        return new CurseForgeProjectCard(castMod, instanceOrServer, e -> {
+        CurseForgeProjectCard card = new CurseForgeProjectCard(castMod, instanceOrServer, e -> {
             if (sectionValue.equals("Plugins")) {
                 Analytics.trackEvent(AnalyticsEvent.forAddPlugin(castMod));
             } else if (sectionValue.equals("Data Packs")) {
@@ -1173,11 +1205,17 @@ public final class AddModsDialog extends JDialog {
                 }
             }
         }, view, LoaderIndicators.forSection(LoaderIndicators.fromCurseForge(castMod), sectionValue));
+
+        // settled by the search result's latest-file index, with no request
+        card.compatibility().setVerdict(ModCompatibility.forCurseForgeProject(
+                ModCompatibility.Target.of(instanceOrServer), sectionValue, castMod));
+        return card;
     }
 
     private void setModrinthMods(List<ModrinthSearchHit> hits, boolean hasNext) {
         rerenderResults = () -> setModrinthMods(hits, hasNext);
         ResultsView view = App.settings.addModsView();
+        pageResults.clear();
 
         if (hits == null || hits.isEmpty()) {
             contentPanel.removeAll();
@@ -1192,10 +1230,13 @@ public final class AddModsDialog extends JDialog {
                     .orElse("Mods");
             List<JComponent> cards = new ArrayList<>();
             for (ModrinthSearchHit hit : hits) {
-                cards.add(modrinthCard(hit, sectionValue, view, this));
+                ModrinthSearchHitCard card = modrinthCard(hit, sectionValue, view, this);
+                pageResults.put(card, card.compatibility());
+                cards.add(card);
             }
             layOutResults(contentPanel, cards, view);
         }
+        applyCompatibilityFilter();
 
         SwingUtilities.invokeLater(() -> jscrollPane.getVerticalScrollBar().setValue(0));
 
@@ -1211,7 +1252,7 @@ public final class AddModsDialog extends JDialog {
      */
     ModrinthSearchHitCard modrinthCard(ModrinthSearchHit castMod, String sectionValue, ResultsView view,
             Window parent) {
-        return new ModrinthSearchHitCard(castMod, instanceOrServer, e -> {
+        ModrinthSearchHitCard card = new ModrinthSearchHitCard(castMod, instanceOrServer, e -> {
             final ProgressDialog<ModrinthProject> modrinthProjectLookupDialog = new ProgressDialog<>(
                     GetText.tr("Getting Mod Information"), 0, GetText.tr("Getting Mod Information"),
                     "Aborting Getting Mod Information", parent);
@@ -1293,6 +1334,44 @@ public final class AddModsDialog extends JDialog {
                 }
             }
         }, view, LoaderIndicators.forSection(LoaderIndicators.fromModrinth(castMod), sectionValue));
+
+        // checked in the background unless the search result settles it; dropped once another search replaces it
+        int generation = fetchGeneration.get();
+        BooleanSupplier stillShown = () -> generation == fetchGeneration.get();
+        card.compatibility().setVerdict(compatibilityChecker.modrinth(ModCompatibility.Target.of(instanceOrServer),
+                sectionValue, castMod, stillShown, verdict -> SwingUtilities.invokeLater(() -> {
+                    if (stillShown.getAsBoolean()) {
+                        card.compatibility().setVerdict(verdict);
+                        applyCompatibilityFilter();
+                    }
+                })));
+        return card;
+    }
+
+    /**
+     * Hides this page's results that have no file for the instance while "Hide incompatible" is on, and says how
+     * many, so filtering is never silent. Results still being checked, or that couldn't be, stay.
+     */
+    private void applyCompatibilityFilter() {
+        int hidden = 0;
+        for (Map.Entry<JComponent, CompatibilityBadge> result : pageResults.entrySet()) {
+            boolean hide = ModCompatibility.hiddenWhenFiltering(App.settings.addModsHideIncompatible,
+                    result.getValue().state());
+            result.getKey().setVisible(!hide);
+            hidden += hide ? 1 : 0;
+        }
+
+        // #. {0} results hidden as incompatible, out of {1} on this page
+        hiddenCountLabel.setText(GetText.tr("{0} of {1} hidden", hidden, pageResults.size()));
+        hiddenCountLabel.setVisible(hidden > 0);
+        contentPanel.revalidate();
+        contentPanel.repaint();
+    }
+
+    @Override
+    public void dispose() {
+        compatibilityChecker.shutdown();
+        super.dispose();
     }
 
     private void addSectionAndSortOptions(boolean firstTime) {

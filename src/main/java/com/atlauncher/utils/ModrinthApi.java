@@ -388,6 +388,17 @@ public class ModrinthApi {
     @Nullable
     public static List<ModrinthVersion> getVersions(String projectId, String minecraftVersion,
         LoaderVersion loaderVersion) {
+        return getVersionsForLoaders(projectId, minecraftVersion,
+            loaderVersion == null ? null : loaderFilter(loaderVersion, minecraftVersion));
+    }
+
+    /**
+     * A project's versions for a Minecraft version and any of these Modrinth loaders; either filter is skipped when
+     * null. Null when the request fails.
+     */
+    @Nullable
+    public static List<ModrinthVersion> getVersionsForLoaders(String projectId, String minecraftVersion,
+        List<String> loaders) {
         String queryParamsString = "";
 
         if (minecraftVersion != null) {
@@ -398,15 +409,14 @@ public class ModrinthApi {
             queryParamsString += String.format("game_versions=[\"%s\"]", minecraftVersion);
         }
 
-        if (loaderVersion != null) {
+        if (loaders != null) {
             if (queryParamsString.isEmpty()) {
                 queryParamsString += "?";
             } else {
                 queryParamsString += "&";
             }
 
-            queryParamsString += String.format("loaders=%s",
-                Gsons.DEFAULT_SLIM.toJson(loaderFilter(loaderVersion, minecraftVersion)));
+            queryParamsString += String.format("loaders=%s", Gsons.DEFAULT_SLIM.toJson(loaders));
         }
 
         java.lang.reflect.Type type = new TypeToken<List<ModrinthVersion>>() {

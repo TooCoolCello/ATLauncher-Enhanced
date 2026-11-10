@@ -17,6 +17,7 @@
  */
 package com.atlauncher.gui.card;
 
+import java.awt.Color;
 import java.awt.Component;
 import java.awt.FlowLayout;
 import java.awt.Font;
@@ -37,6 +38,7 @@ import javax.swing.Icon;
 import javax.swing.ImageIcon;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.UIManager;
 
 import org.mini2Dx.gettext.GetText;
 
@@ -122,9 +124,16 @@ final class LoaderIndicatorStrip {
      */
     static final class LetterTile implements Icon {
         final String letters;
+        // a theme color key to draw in instead of the label's foreground, or null
+        private final String colorKey;
 
         LetterTile(String letters) {
+            this(letters, null);
+        }
+
+        LetterTile(String letters, String colorKey) {
             this.letters = letters;
+            this.colorKey = colorKey;
         }
 
         @Override
@@ -133,7 +142,8 @@ final class LoaderIndicatorStrip {
             try {
                 g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
                 g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-                g2.setColor(c.getForeground());
+                Color color = colorKey == null ? null : UIManager.getColor(colorKey);
+                g2.setColor(color == null ? c.getForeground() : color);
                 g2.drawRoundRect(x, y, ICON_SIZE - 1, ICON_SIZE - 1, 5, 5);
 
                 g2.setFont(c.getFont().deriveFont(Font.BOLD, 8f));
