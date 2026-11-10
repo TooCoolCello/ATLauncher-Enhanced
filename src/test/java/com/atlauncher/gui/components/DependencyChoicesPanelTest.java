@@ -182,6 +182,24 @@ public class DependencyChoicesPanelTest {
     }
 
     @Test
+    public void aDisabledRequiredOneIsEnabledWithoutAProblem(@TempDir Path root) throws IOException {
+        DisableableMod lib = new DisableableMod();
+        lib.name = "lib";
+        lib.file = "lib.jar";
+        lib.type = Type.mods;
+        lib.disabled = true;
+        Files.createDirectories(root.resolve("disabledmods"));
+        Files.write(root.resolve("disabledmods/lib.jar"), new byte[] { 1 });
+
+        DependencyChoicesPanel<String> panel = new DependencyChoicesPanel<>();
+        panel.show(Collections.singletonList(item("lib", Kind.REQUIRED, State.DISABLED, lib, false)));
+
+        assertTrue(panel.apply(new Recorder(root), null, (item, file) -> true).isEmpty());
+        assertFalse(lib.isDisabled());
+        assertTrue(Files.exists(root.resolve("mods/lib.jar")));
+    }
+
+    @Test
     public void unmetRequiredDependenciesAreWarnedAboutAndFailuresReported() {
         DependencyChoicesPanel<String> panel = new DependencyChoicesPanel<>();
         DependencyChoicesPanel.Item<String> unresolved = item("gone", Kind.REQUIRED, State.UNRESOLVED, null, false);
