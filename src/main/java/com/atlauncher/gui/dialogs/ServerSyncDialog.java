@@ -81,7 +81,8 @@ public final class ServerSyncDialog extends JDialog {
     private final JLabel warnings = new JLabel();
     private final JLabel counts = new JLabel(" ");
     private final JCheckBox showUnchanged = new JCheckBox(GetText.tr("Show unchanged files"));
-    private final JCheckBox backUp = new JCheckBox(GetText.tr("Back up replaced files on the server"), true);
+    private final JLabel backupNote = new JLabel(GetText.tr("Replaced and removed files are moved into a dated folder "
+        + "in atlauncher-backups on the server."));
     private final JButton tick = new JButton(GetText.tr("Tick Selected"));
     private final JButton untick = new JButton(GetText.tr("Untick Selected"));
     private final JButton check = new JButton(GetText.tr("Check Again"));
@@ -128,8 +129,6 @@ public final class ServerSyncDialog extends JDialog {
         filter();
         tick.addActionListener(e -> tickSelected(true));
         untick.addActionListener(e -> tickSelected(false));
-        backUp.setToolTipText(GetText.tr("Files the sync replaces are moved into a dated folder in "
-            + "atlauncher-backups on the server. Removed files always are."));
 
         JLabel where = new JLabel(GetText.tr("Server: {0}", server.name + "  -  " + server.describe()));
         warnings.setIcon(UIManager.getIcon("OptionPane.warningIcon"));
@@ -176,7 +175,7 @@ public final class ServerSyncDialog extends JDialog {
         });
 
         JPanel options = new JPanel(new FlowLayout(FlowLayout.LEADING, 0, 0));
-        options.add(backUp);
+        options.add(backupNote);
         JPanel window = new JPanel(new FlowLayout(FlowLayout.TRAILING, 4, 0));
         window.add(check);
         window.add(apply);
@@ -225,7 +224,6 @@ public final class ServerSyncDialog extends JDialog {
         boolean ready = !busy && model.changes.stream().anyMatch(c -> c.kind != ServerSync.Kind.UNCHANGED);
         check.setEnabled(!busy);
         close.setEnabled(!busy);
-        backUp.setEnabled(!busy);
         tick.setEnabled(ready);
         untick.setEnabled(ready);
         apply.setText(busy ? GetText.tr("Cancel") : GetText.tr("Apply"));
@@ -363,7 +361,6 @@ public final class ServerSyncDialog extends JDialog {
             status.setText(GetText.tr("Tick something to change."));
             return;
         }
-        boolean backUpReplaced = backUp.isSelected();
         long total = ticked.stream().filter(c -> c.kind != ServerSync.Kind.REMOVE).mapToLong(c -> c.size).sum();
         cancelRequested = false;
         setBusy(true);
@@ -376,7 +373,7 @@ public final class ServerSyncDialog extends JDialog {
                 }
                 String base = server.getRemotePath();
                 String backupFolder = SftpUpload.backupFolder(base, LocalDateTime.now(ZoneId.systemDefault()));
-                ServerSync.Result result = ServerSync.apply(client, base, ticked, backUpReplaced, backupFolder,
+                ServerSync.Result result = ServerSync.apply(client, base, ticked, backupFolder,
                     (change, done) -> {
                         SwingUtilities.invokeLater(() -> {
                             if (!cancelRequested) {

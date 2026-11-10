@@ -221,7 +221,7 @@ class ServerSyncTest {
         find(changes, "config/made-by-server.toml").selected = true;
         String backup = "/atlauncher-backups/2026-11-10_14-03-22";
 
-        ServerSync.Result result = ServerSync.apply(client, "/", changes, true, backup, (change, done) -> true);
+        ServerSync.Result result = ServerSync.apply(client, "/", changes, backup, (change, done) -> true);
 
         assertNull(result.error);
         assertFalse(result.cancelled);
@@ -254,7 +254,7 @@ class ServerSyncTest {
         List<ServerSync.Change> changes = plan();
         List<ServerSync.Change> seen = new ArrayList<>();
 
-        ServerSync.Result result = ServerSync.apply(client, "/", changes, true, "/atlauncher-backups/x",
+        ServerSync.Result result = ServerSync.apply(client, "/", changes, "/atlauncher-backups/x",
             (change, done) -> {
                 if (!seen.contains(change)) {
                     seen.add(change);
