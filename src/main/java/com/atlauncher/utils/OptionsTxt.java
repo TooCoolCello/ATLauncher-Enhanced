@@ -152,8 +152,13 @@ public final class OptionsTxt {
 
         // written beside it then moved over, so a failed write can't leave a half-written options.txt
         Path temp = target.resolveSibling(target.getFileName() + ".atlauncher-tmp");
-        Files.write(temp, merge(text, values).getBytes(CHARSET));
-        Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
+        try {
+            Files.write(temp, merge(text, values).getBytes(CHARSET));
+            Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
+        } finally {
+            // left only when the write or move failed
+            Files.deleteIfExists(temp);
+        }
 
         return values;
     }

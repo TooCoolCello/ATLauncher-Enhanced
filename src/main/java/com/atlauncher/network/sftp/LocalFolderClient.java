@@ -122,7 +122,7 @@ public class LocalFolderClient implements SftpClient {
         if (!Files.isDirectory(target.getParent())) {
             throw new NoSuchFileException(remotePath);
         }
-        copy(Files.newInputStream(local), Files.newOutputStream(target), progress);
+        copy(local, target, progress);
     }
 
     @Override
@@ -131,11 +131,12 @@ public class LocalFolderClient implements SftpClient {
         if (!Files.isRegularFile(source)) {
             throw new NoSuchFileException(remotePath);
         }
-        copy(Files.newInputStream(source), Files.newOutputStream(local), progress);
+        copy(source, local, progress);
     }
 
-    private void copy(InputStream input, OutputStream output, LongPredicate progress) throws IOException {
-        try (InputStream in = input; OutputStream out = output) {
+    // both opened here, so the input is closed even when the output can't be opened
+    private void copy(Path from, Path to, LongPredicate progress) throws IOException {
+        try (InputStream in = Files.newInputStream(from); OutputStream out = Files.newOutputStream(to)) {
             byte[] buffer = new byte[chunk];
             int read;
             while ((read = in.read(buffer)) > 0) {
