@@ -36,6 +36,8 @@ import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.JTextArea;
 import javax.swing.SwingUtilities;
+import javax.swing.event.PopupMenuEvent;
+import javax.swing.event.PopupMenuListener;
 
 import org.mini2Dx.gettext.GetText;
 
@@ -44,6 +46,7 @@ import com.atlauncher.builders.HTMLBuilder;
 import com.atlauncher.constants.Constants;
 import com.atlauncher.data.BackupMode;
 import com.atlauncher.data.Instance;
+import com.atlauncher.data.RemoteServer;
 import com.atlauncher.data.minecraft.loaders.LoaderType;
 import com.atlauncher.gui.components.CollapsiblePanel;
 import com.atlauncher.gui.components.DropDownButton;
@@ -54,6 +57,8 @@ import com.atlauncher.gui.dialogs.InstanceExportDialog;
 import com.atlauncher.gui.dialogs.InstanceSettingsDialog;
 import com.atlauncher.gui.dialogs.ManageWorldConfigDefaultsDialog;
 import com.atlauncher.gui.dialogs.ProgressDialog;
+import com.atlauncher.gui.dialogs.RemoteServerUploadDialog;
+import com.atlauncher.gui.dialogs.RemoteServersDialog;
 import com.atlauncher.managers.AccountManager;
 import com.atlauncher.managers.ConfigManager;
 import com.atlauncher.managers.DialogManager;
@@ -124,6 +129,8 @@ public class InstanceCard extends CollapsiblePanel {
     private final JMenuItem changeImageMenuItem = new JMenuItem(GetText.tr("Change Image"));
     private final JMenuItem manageWorldConfigDefaultsMenuItem = new JMenuItem(
             GetText.tr("Manage World Config Defaults..."));
+    private final JMenuItem remoteServerLinkMenuItem = new JMenuItem(GetText.tr("Link Remote Server..."));
+    private final JMenuItem uploadToRemoteServerMenuItem = new JMenuItem(GetText.tr("Upload to Remote Server..."));
     // #. {0} is the loader (Forge/Fabric/Quilt)
     private final JMenuItem addFabricMenuItem = new JMenuItem(GetText.tr("Add {0}", "Fabric"));
     // #. {0} is the loader (Forge/Fabric/Quilt)
@@ -337,6 +344,8 @@ public class InstanceCard extends CollapsiblePanel {
         editInstancePopupMenu.add(changeDescriptionMenuItem);
         editInstancePopupMenu.add(changeImageMenuItem);
         editInstancePopupMenu.add(manageWorldConfigDefaultsMenuItem);
+        editInstancePopupMenu.add(remoteServerLinkMenuItem);
+        editInstancePopupMenu.add(uploadToRemoteServerMenuItem);
         editInstancePopupMenu.addSeparator();
 
         if (ConfigManager.getConfigItem("loaders.fabric.enabled", true)
@@ -398,6 +407,31 @@ public class InstanceCard extends CollapsiblePanel {
                 + "in this instance start with, and copy more from its worlds."));
         manageWorldConfigDefaultsMenuItem.addActionListener(
                 e -> ManageWorldConfigDefaultsDialog.open(SwingUtilities.getWindowAncestor(this), instance));
+        remoteServerLinkMenuItem.addActionListener(
+                e -> RemoteServersDialog.chooseLink(SwingUtilities.getWindowAncestor(this), instance));
+        uploadToRemoteServerMenuItem.addActionListener(
+                e -> RemoteServerUploadDialog.open(SwingUtilities.getWindowAncestor(this), instance));
+        // the linked server is looked up each time, as it can be renamed or removed in Remote Servers
+        editInstancePopupMenu.addPopupMenuListener(new PopupMenuListener() {
+            @Override
+            public void popupMenuWillBecomeVisible(PopupMenuEvent e) {
+                RemoteServer linked = RemoteServersDialog.linkedServer(instance);
+                // #. {0} is the name of the remote server the instance is linked to
+                remoteServerLinkMenuItem.setText(linked == null ? GetText.tr("Link Remote Server...")
+                        : GetText.tr("Remote Server: {0}...", linked.name));
+                // #. {0} is the name of the remote server the instance is linked to
+                uploadToRemoteServerMenuItem.setText(linked == null ? GetText.tr("Upload to Remote Server...")
+                        : GetText.tr("Upload to {0}...", linked.name));
+            }
+
+            @Override
+            public void popupMenuWillBecomeInvisible(PopupMenuEvent e) {
+            }
+
+            @Override
+            public void popupMenuCanceled(PopupMenuEvent e) {
+            }
+        });
 
         // loader things
         addFabricMenuItem.addActionListener(e -> {

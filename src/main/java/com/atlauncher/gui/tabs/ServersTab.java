@@ -24,10 +24,12 @@ import java.awt.GridBagLayout;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 
+import javax.swing.JButton;
 import javax.swing.JLayer;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextField;
+import javax.swing.SwingUtilities;
 
 import org.mini2Dx.gettext.GetText;
 
@@ -36,6 +38,7 @@ import com.atlauncher.constants.UIConstants;
 import com.atlauncher.gui.WheelScrollLayerUI;
 import com.atlauncher.gui.card.NilCard;
 import com.atlauncher.gui.card.ServerCard;
+import com.atlauncher.gui.dialogs.RemoteServersDialog;
 import com.atlauncher.gui.panels.HierarchyPanel;
 import com.atlauncher.network.Analytics;
 import com.atlauncher.network.analytics.AnalyticsEvent;
@@ -84,6 +87,11 @@ public class ServersTab extends HierarchyPanel implements Tab {
         searchBox.putClientProperty("JTextField.leadingIcon", new FlatSearchIcon());
         searchBox.putClientProperty("JTextField.showClearButton", true);
         searchBox.putClientProperty("JTextField.clearCallback", (Runnable) () -> viewModel.setSearchSubject(""));
+        // remote SFTP servers live beside the local ones, managed in their own dialog
+        JButton remoteServers = new JButton(GetText.tr("Remote Servers..."));
+        remoteServers.setToolTipText(GetText.tr("Add, edit and test SFTP servers to upload instance files to"));
+        remoteServers.addActionListener(e -> RemoteServersDialog.open(SwingUtilities.getWindowAncestor(this)));
+        topPanel.add(remoteServers);
         topPanel.add(searchBox);
 
         add(topPanel, BorderLayout.NORTH);
