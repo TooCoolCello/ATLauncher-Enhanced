@@ -54,6 +54,7 @@ import com.atlauncher.constants.Constants;
 import com.atlauncher.data.AddModRestriction;
 import com.atlauncher.data.DisableableMod;
 import com.atlauncher.data.Instance;
+import com.atlauncher.data.LoaderIndicators;
 import com.atlauncher.data.ModManagement;
 import com.atlauncher.data.ModPlatform;
 import com.atlauncher.data.ResultsView;
@@ -1171,7 +1172,7 @@ public final class AddModsDialog extends JDialog {
                     installForgifiedFabricApiButton.setVisible(true);
                 }
             }
-        }, view);
+        }, view, LoaderIndicators.forSection(LoaderIndicators.fromCurseForge(castMod), sectionValue));
     }
 
     private void setModrinthMods(List<ModrinthSearchHit> hits, boolean hasNext) {
@@ -1291,7 +1292,7 @@ public final class AddModsDialog extends JDialog {
                     installForgifiedFabricApiButton.setVisible(true);
                 }
             }
-        }, view);
+        }, view, LoaderIndicators.forSection(LoaderIndicators.fromModrinth(castMod), sectionValue));
     }
 
     private void addSectionAndSortOptions(boolean firstTime) {

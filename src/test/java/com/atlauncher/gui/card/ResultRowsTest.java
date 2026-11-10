@@ -31,6 +31,7 @@ import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.function.Predicate;
@@ -58,6 +59,7 @@ import com.atlauncher.data.Settings;
 import com.atlauncher.data.curseforge.CurseForgeAuthor;
 import com.atlauncher.data.curseforge.CurseForgeProject;
 import com.atlauncher.data.minecraft.MinecraftVersion;
+import com.atlauncher.data.minecraft.loaders.LoaderType;
 import com.atlauncher.data.modrinth.ModrinthProject;
 import com.atlauncher.data.modrinth.ModrinthSearchHit;
 import com.atlauncher.data.modrinth.ModrinthVersion;
@@ -175,7 +177,7 @@ public class ResultRowsTest {
         hit.description = description;
         hit.downloads = downloads;
         return sized(new ModrinthSearchHitCard(hit, instance(installed), e -> clicks.add("install"),
-            e -> clicks.add("remove"), view), width);
+            e -> clicks.add("remove"), view, Collections.emptySet()), width);
     }
 
     private static ModrinthSearchHitCard modrinth(boolean installed, ResultsView view, int width) {
@@ -195,7 +197,7 @@ public class ResultRowsTest {
         project.authors = Collections.singletonList(author);
         return sized(new CurseForgeProjectCard(project, instance(installed), e -> {
         }, e -> {
-        }, view), width);
+        }, view, Collections.emptySet()), width);
     }
 
     private static final List<String> NAMES = Arrays.asList("Sodium", "No Metadata", "Short",
@@ -418,9 +420,9 @@ public class ResultRowsTest {
             JLabel hiddenMark = new JLabel(new ImageIcon(new BufferedImage(50, 50, BufferedImage.TYPE_INT_ARGB)));
             hiddenMark.setVisible(false);
 
-            ResultRow.layout(shown, compact, new JLabel(), "Name", "Author", "Summary", 5, shownMark,
+            ResultRow.layout(shown, compact, new JLabel(), "Name", "Author", "Summary", 5, null, shownMark,
                 new JButton("Add"));
-            ResultRow.layout(hidden, compact, new JLabel(), "Name", "Author", "Summary", 5, hiddenMark,
+            ResultRow.layout(hidden, compact, new JLabel(), "Name", "Author", "Summary", 5, null, hiddenMark,
                 new JButton("Add"));
 
             assertEquals(hidden.getPreferredSize().height, shown.getPreferredSize().height);
@@ -459,5 +461,23 @@ public class ResultRowsTest {
         assertEquals(Collections.singletonList("one two"),
             new ResultRow.WrappedText("one two", 2).wrap(metrics, width));
         assertTrue(new ResultRow.WrappedText(null, 2).wrap(metrics, width).isEmpty());
+    }
+
+    @Test
+    void everyViewShowsTheReportedLoaders() {
+        ModrinthSearchHit hit = new ModrinthSearchHit();
+        hit.projectId = "P1";
+        hit.slug = "sodium";
+        hit.title = "Sodium";
+        hit.description = DESCRIPTION;
+        for (ResultsView view : ResultsView.values()) {
+            ModrinthSearchHitCard card = sized(new ModrinthSearchHitCard(hit, instance(false), e -> {
+            }, e -> {
+            }, view, EnumSet.of(LoaderType.FABRIC, LoaderType.NEOFORGE)), NARROW);
+            List<String> names = all(card, JLabel.class).stream()
+                .map(label -> label.getAccessibleContext().getAccessibleName()).collect(Collectors.toList());
+            assertTrue(names.contains(LoaderType.FABRIC.toString()), view + ": " + names);
+            assertTrue(names.contains(LoaderType.NEOFORGE.toString()), view + ": " + names);
+        }
     }
 }

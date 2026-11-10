@@ -83,11 +83,12 @@ final class ResultRow {
 
     /**
      * @param author    or null when not known
-     * @param downloads or 0 when not known
-     * @param actions   the card's buttons: the first (Add) is shown instead of those between it and the last (View)
+     * @param downloads   or 0 when not known
+     * @param loaderStrip reported-loader icons shown before the download count, or null for none
+     * @param actions     the card's buttons: the first (Add) is shown instead of those between it and the last (View)
      */
     static void layout(JPanel row, boolean compact, JLabel icon, String name, String author, String description,
-            int downloads, JLabel installedLabel, JButton... actions) {
+            int downloads, JPanel loaderStrip, JLabel installedLabel, JButton... actions) {
         row.setLayout(new BorderLayout(compact ? 8 : 10, 0));
         row.setBorder(border(compact ? 3 : 8, compact ? 8 : 10));
 
@@ -100,7 +101,7 @@ final class ResultRow {
         iconSlot.setPreferredSize(new Dimension(iconSize, iconSize));
         iconSlot.add(icon, BorderLayout.CENTER);
 
-        JPanel firstLine = firstLine(compact, name, author, downloads, installedLabel, actions);
+        JPanel firstLine = firstLine(compact, name, author, downloads, loaderStrip, installedLabel, actions);
         if (compact) {
             JPanel iconColumn = new JPanel(new GridBagLayout());
             iconColumn.setOpaque(false);
@@ -123,7 +124,7 @@ final class ResultRow {
     }
 
     private static JPanel firstLine(boolean compact, String name, String author, int downloads,
-            JLabel installedLabel, JButton... actions) {
+            JPanel loaderStrip, JLabel installedLabel, JButton... actions) {
         boolean hasAuthor = author != null && !author.trim().isEmpty();
 
         // shortened by its own measure: the theme's bold is drawn wider than a plain label reckons
@@ -151,7 +152,11 @@ final class ResultRow {
         // fixed widths at the right, so they sit in the same place in every row
         JPanel fixed = new JPanel(new BorderLayout(COLUMN_GAP, 0));
         fixed.setOpaque(false);
-        fixed.add(downloads(downloads), BorderLayout.WEST);
+        // the loader icons go left of the downloads, so a row with more of them only takes from the name
+        if (loaderStrip != null) {
+            fixed.add(loaderStrip, BorderLayout.WEST);
+        }
+        fixed.add(downloads(downloads), BorderLayout.CENTER);
         fixed.add(actionColumn(compact ? COMPACT_MARGIN : LIST_MARGIN, actions), BorderLayout.EAST);
 
         JPanel whole = new JPanel(new BorderLayout(COLUMN_GAP, 0));
