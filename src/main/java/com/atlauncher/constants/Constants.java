@@ -125,6 +125,8 @@ public class Constants {
 
     // Modrinth domains, endpoints, config, etc
     public static final String MODRINTH_API_URL = "https://api.modrinth.com/v2";
+    // collections are only in the v3 API
+    public static final String MODRINTH_API_V3_URL = "https://api.modrinth.com/v3";
     public static final String MODRINTH_HOST = "api.modrinth.com";
     public static final String MODRINTH_FILE_DOWNLOAD_HOST = "cdn.modrinth.com";
     public static final String MODRINTH_DOWNLOAD_METADATA_HEADER = "modrinth-download-meta";

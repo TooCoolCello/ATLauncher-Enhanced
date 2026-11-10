@@ -17,6 +17,7 @@
  */
 package com.atlauncher.utils;
 
+import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -40,6 +41,7 @@ import com.atlauncher.Network;
 import com.atlauncher.constants.Constants;
 import com.atlauncher.data.minecraft.loaders.LoaderVersion;
 import com.atlauncher.data.modrinth.ModrinthCategory;
+import com.atlauncher.data.modrinth.ModrinthCollection;
 import com.atlauncher.data.modrinth.ModrinthProject;
 import com.atlauncher.data.modrinth.ModrinthProjectType;
 import com.atlauncher.data.modrinth.ModrinthSearchResult;
@@ -349,6 +351,34 @@ public class ModrinthApi {
             String.format("%s/project/%s", Constants.MODRINTH_API_URL, projectId.replace("local-", "")),
             getHeaders(), ModrinthProject.class,
             new CacheControl.Builder().maxStale(10, TimeUnit.MINUTES).build());
+    }
+
+    /**
+     * A public collection, always fresh from Modrinth. The ID must already be checked to be only letters and digits.
+     *
+     * @throws IOException when Modrinth can't be reached, or a DownloadException with its status code when it answers
+     *                     with an error, such as 404 for one that doesn't exist or is private
+     */
+    public static @Nullable ModrinthCollection getCollection(String collectionId) throws IOException {
+        return NetworkClient.getWithThrow(
+            String.format("%s/collection/%s", Constants.MODRINTH_API_V3_URL, collectionId), getHeaders(),
+            ModrinthCollection.class);
+    }
+
+    /**
+     * A creator's collections that this requester can see, always fresh from Modrinth: their listed ones with
+     * projects in them, and with the launcher's Modrinth API key set, the key owner's own unlisted and private ones.
+     * The username or ID must already be checked to be only letters, digits, _ and -.
+     *
+     * @throws IOException when Modrinth can't be reached, or a DownloadException with its status code when it answers
+     *                     with an error, such as 404 for a creator that doesn't exist
+     */
+    public static @Nullable List<ModrinthCollection> getUserCollections(String user) throws IOException {
+        java.lang.reflect.Type type = new TypeToken<List<ModrinthCollection>>() {
+        }.getType();
+
+        return NetworkClient.getWithThrow(
+            String.format("%s/user/%s/collections", Constants.MODRINTH_API_V3_URL, user), getHeaders(), type);
     }
 
     public static @Nullable List<ModrinthVersion> getVersions(String projectId) {

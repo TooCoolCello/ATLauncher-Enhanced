@@ -105,7 +105,11 @@ public class Settings {
     public boolean dontCheckModsOnCurseForge = false;
     public boolean dontCheckModsOnModrinth = false;
     public int addModsPageSize = DEFAULT_ADD_MODS_PAGE_SIZE;
+    // Add Mods' view from before there were three; only read, to carry what it meant over to addModsView
     public AddModsViewMode addModsViewMode = AddModsViewMode.CARDS;
+    // each window's own view; null until first used, then set from the one before so nothing changes by itself
+    public ResultsView addModsView;
+    public ResultsView collectionsView;
     public boolean scanModsOnLaunch = true;
 
     // Java/Minecraft
@@ -406,6 +410,29 @@ public class Settings {
         if (addModsViewMode == null) {
             addModsViewMode = AddModsViewMode.CARDS;
         }
+        addModsView();
+        collectionsView();
+    }
+
+    /**
+     * Add Mods' view: as chosen, or at first what its earlier setting meant, whose "List" was the compact one.
+     */
+    public ResultsView addModsView() {
+        if (addModsView == null) {
+            addModsView = ResultsView.fromLegacy(addModsViewMode);
+        }
+        return addModsView;
+    }
+
+    /**
+     * Collections' view: as chosen, or at first what Add Mods showed, as the two shared it before. Once set, changing
+     * either doesn't change the other.
+     */
+    public ResultsView collectionsView() {
+        if (collectionsView == null) {
+            collectionsView = addModsView();
+        }
+        return collectionsView;
     }
 
     private void validateDefaultModPlatform() {

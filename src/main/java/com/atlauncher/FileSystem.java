@@ -72,6 +72,9 @@ public final class FileSystem {
     public static final Path LAUNCHER_CONFIG = CONFIGS.resolve(Constants.LAUNCHER_NAME + ".conf");
     public static final Path SETTINGS = CONFIGS.resolve(Constants.LAUNCHER_NAME + ".json");
     public static final Path ACCOUNTS = CONFIGS.resolve("accounts.json");
+    // saved Modrinth collections from before the collections library; only read, to carry them over
+    public static final Path MODRINTH_COLLECTIONS = CONFIGS.resolve("modrinth_collections.json");
+    public static final Path COLLECTIONS = CONFIGS.resolve("collections.json");
 
     /**
      * This will organise the file system. This will remove old folders, create

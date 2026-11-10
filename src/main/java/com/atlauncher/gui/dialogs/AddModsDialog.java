@@ -33,8 +33,8 @@ import java.util.stream.Collectors;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
-import javax.swing.ButtonGroup;
 import javax.swing.JButton;
+import javax.swing.JComponent;
 import javax.swing.JComboBox;
 import javax.swing.JDialog;
 import javax.swing.JEditorPane;
@@ -42,7 +42,6 @@ import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextField;
-import javax.swing.JToggleButton;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 import javax.swing.event.HyperlinkEvent;
@@ -53,12 +52,11 @@ import com.atlauncher.App;
 import com.atlauncher.builders.HTMLBuilder;
 import com.atlauncher.constants.Constants;
 import com.atlauncher.data.AddModRestriction;
-import com.atlauncher.data.AddModsViewMode;
 import com.atlauncher.data.DisableableMod;
 import com.atlauncher.data.Instance;
-import com.atlauncher.data.LoaderIndicators;
 import com.atlauncher.data.ModManagement;
 import com.atlauncher.data.ModPlatform;
+import com.atlauncher.data.ResultsView;
 import com.atlauncher.data.Settings;
 import com.atlauncher.data.curseforge.CurseForgeCategoryForGame;
 import com.atlauncher.data.curseforge.CurseForgeCoreApiResponse;
@@ -71,6 +69,7 @@ import com.atlauncher.data.modrinth.ModrinthSearchResult;
 import com.atlauncher.exceptions.InvalidMinecraftVersion;
 import com.atlauncher.gui.card.CurseForgeProjectCard;
 import com.atlauncher.gui.card.ModrinthSearchHitCard;
+import com.atlauncher.gui.components.ResultsViewPicker;
 import com.atlauncher.gui.layouts.WrapLayout;
 import com.atlauncher.gui.panels.LoadingPanel;
 import com.atlauncher.gui.panels.NoCurseModsPanel;
@@ -96,6 +95,8 @@ public final class AddModsDialog extends JDialog {
     private final JPanel topPanel = new JPanel(new BorderLayout());
     private final JPanel warningPanel = new JPanel();
     private final JTextField searchField = new JTextField(16);
+    // the local collections library, from either provider's tab
+    private final JButton collectionsButton = new JButton(GetText.tr("Collections..."));
     private final JLabel platformMessageLabel = new JLabel();
     private final JComboBox<ComboItem<ModPlatform>> hostComboBox = new JComboBox<>();
     private final JComboBox<ComboItem<String>> sectionComboBox = new JComboBox<>();
@@ -104,8 +105,8 @@ public final class AddModsDialog extends JDialog {
     private final JComboBox<Integer> pageSizeComboBox = new JComboBox<>();
     // bumped for every fetch so only the latest one may update the UI
     private final AtomicInteger fetchGeneration = new AtomicInteger();
-    private final JToggleButton cardsViewButton = new JToggleButton(GetText.tr("Cards"));
-    private final JToggleButton listViewButton = new JToggleButton(GetText.tr("List"));
+    // Cards, Compact List or List: Add Mods' own choice, apart from Collections'
+    private final ResultsViewPicker viewPicker = new ResultsViewPicker(App.settings.addModsView(), this::setViewMode);
     // redraws the results currently shown (EDT only); null while loading or before any results
     private Runnable rerenderResults = null;
 
@@ -243,6 +244,12 @@ public final class AddModsDialog extends JDialog {
         searchButtonsPanel.add(this.categoriesComboBox);
         searchButtonsPanel.add(Box.createHorizontalStrut(20));
         searchButtonsPanel.add(this.searchField);
+        searchButtonsPanel.add(Box.createHorizontalStrut(5));
+        searchButtonsPanel.add(this.collectionsButton);
+        this.collectionsButton.setToolTipText(GetText.tr("Your collections of CurseForge and Modrinth projects, and "
+                + "Modrinth collections you've opened or saved"));
+        this.collectionsButton.addActionListener(
+                e -> new CollectionsDialog(this, instanceOrServer).setVisible(true));
 
         this.installFabricApiButton.addActionListener(e -> {
             ModPlatform selectedHost = ((ComboItem<ModPlatform>) hostComboBox.getSelectedItem()).getValue();
@@ -683,15 +690,7 @@ public final class AddModsDialog extends JDialog {
             getMods();
         });
 
-        ButtonGroup viewModeGroup = new ButtonGroup();
-        viewModeGroup.add(cardsViewButton);
-        viewModeGroup.add(listViewButton);
-        (App.settings.addModsViewMode == AddModsViewMode.LIST ? listViewButton : cardsViewButton).setSelected(true);
-        cardsViewButton.addActionListener(e -> setViewMode(AddModsViewMode.CARDS));
-        listViewButton.addActionListener(e -> setViewMode(AddModsViewMode.LIST));
-
-        bottomButtonsPanel.add(cardsViewButton);
-        bottomButtonsPanel.add(listViewButton);
+        bottomButtonsPanel.add(viewPicker);
         bottomButtonsPanel.add(Box.createHorizontalStrut(10));
         bottomButtonsPanel.add(prevButton);
         bottomButtonsPanel.add(nextButton);
@@ -1021,12 +1020,13 @@ public final class AddModsDialog extends JDialog {
      * Switches between cards and list rows, redrawing the current results in place: no fetch, and the page and
      * Next/Previous state stay as they are.
      */
-    private void setViewMode(AddModsViewMode mode) {
-        if (App.settings.addModsViewMode == mode) {
+    private void setViewMode(ResultsView view) {
+        if (App.settings.addModsView() == view) {
             return;
         }
 
-        App.settings.addModsViewMode = mode;
+        viewPicker.select(view);
+        App.settings.addModsView = view;
         App.settings.save();
 
         if (rerenderResults != null) {
@@ -1047,104 +1047,63 @@ public final class AddModsDialog extends JDialog {
     /**
      * Takes the space below the last list row so rows stay at the top.
      */
-    private void addListFiller(GridBagConstraints gbc) {
+    private static void addListFiller(JPanel panel, GridBagConstraints gbc) {
         gbc.weighty = 1.0;
         gbc.fill = GridBagConstraints.BOTH;
-        contentPanel.add(Box.createGlue(), gbc);
+        panel.add(Box.createGlue(), gbc);
+    }
+
+    /**
+     * Lays out results as Add Mods shows them: wrapped cards, or full-width rows, compact or not, stacked from the
+     * top.
+     */
+    static void layOutResults(JPanel panel, List<? extends JComponent> cards, ResultsView view) {
+        panel.removeAll();
+
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.gridx = 0;
+        gbc.gridy = 0;
+        gbc.weightx = 1.0;
+        gbc.fill = GridBagConstraints.BOTH;
+        gbc.insets.set(2, 2, 2, 2);
+
+        if (view.isRow()) {
+            panel.setLayout(new GridBagLayout());
+            useListRowConstraints(gbc);
+        } else {
+            panel.setLayout(new WrapLayout());
+        }
+
+        for (JComponent card : cards) {
+            panel.add(card, gbc);
+            gbc.gridy++;
+        }
+
+        if (view.isRow()) {
+            addListFiller(panel, gbc);
+        }
     }
 
     private void setCurseForgeMods(List<CurseForgeProject> mods, boolean hasNext) {
         rerenderResults = () -> setCurseForgeMods(mods, hasNext);
-        boolean listView = App.settings.addModsViewMode == AddModsViewMode.LIST;
-
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.gridx = 0;
-        gbc.gridy = 0;
-        gbc.weightx = 1.0;
-        gbc.fill = GridBagConstraints.BOTH;
-        gbc.insets.set(2, 2, 2, 2);
-
-        contentPanel.removeAll();
+        ResultsView view = App.settings.addModsView();
 
         if (mods == null || mods.isEmpty()) {
+            contentPanel.removeAll();
             contentPanel.setLayout(new BorderLayout());
             contentPanel.add(new NoCurseModsPanel(!this.searchField.getText().isEmpty()), BorderLayout.CENTER);
         } else {
             prevButton.setEnabled(page > 0);
             nextButton.setEnabled(hasNext);
 
-            if (listView) {
-                contentPanel.setLayout(new GridBagLayout());
-                useListRowConstraints(gbc);
-            } else {
-                contentPanel.setLayout(new WrapLayout());
+            String sectionValue = Optional.ofNullable((ComboItem<String>) sectionComboBox.getSelectedItem())
+                    .map(ComboItem::getValue)
+                    .orElse("Mods");
+            List<JComponent> cards = new ArrayList<>();
+            for (CurseForgeProject mod : mods) {
+                cards.add(curseForgeCard(mod, sectionValue, view, this));
             }
-
-            mods.forEach(mod -> {
-                CurseForgeProject castMod = mod;
-                String sectionValue = Optional.ofNullable((ComboItem<String>) sectionComboBox.getSelectedItem())
-                        .map(ComboItem::getValue)
-                        .orElse("Mods");
-
-                contentPanel.add(new CurseForgeProjectCard(castMod, instanceOrServer, e -> {
-                    if (sectionValue.equals("Plugins")) {
-                        Analytics.trackEvent(AnalyticsEvent.forAddPlugin(castMod));
-                    } else if (sectionValue.equals("Data Packs")) {
-                        Analytics.trackEvent(AnalyticsEvent.forAddDataPack(castMod));
-                    } else if (sectionValue.equals("Resource Packs")) {
-                        Analytics.trackEvent(AnalyticsEvent.forAddResourcePack(castMod));
-                    } else if (sectionValue.equals("Shaders")) {
-                        Analytics.trackEvent(AnalyticsEvent.forAddShaders(castMod));
-                    } else {
-                        Analytics.trackEvent(AnalyticsEvent.forAddMod(castMod));
-                    }
-
-                    CurseForgeProjectFileSelectorDialog curseForgeProjectFileSelectorDialog = new CurseForgeProjectFileSelectorDialog(
-                            this, castMod, instanceOrServer);
-                    curseForgeProjectFileSelectorDialog.setVisible(true);
-                }, e -> {
-                    if (sectionValue.equals("Plugins")) {
-                        Analytics.trackEvent(AnalyticsEvent.forRemovePlugin(castMod));
-                    } else if (sectionValue.equals("Data Packs")) {
-                        Analytics.trackEvent(AnalyticsEvent.forRemoveDataPack(castMod));
-                    } else if (sectionValue.equals("Resource Packs")) {
-                        Analytics.trackEvent(AnalyticsEvent.forRemoveResourcePack(castMod));
-                    } else if (sectionValue.equals("Shaders")) {
-                        Analytics.trackEvent(AnalyticsEvent.forRemoveShaders(castMod));
-                    } else {
-                        Analytics.trackEvent(AnalyticsEvent.forRemoveMod(castMod));
-                    }
-
-                    Optional<DisableableMod> foundMod = instanceOrServer.getMods().stream()
-                            .filter(dm -> dm.isFromCurseForge() && dm.curseForgeProjectId == castMod.id)
-                            .findFirst();
-
-                    if (foundMod.isPresent()) {
-                        instanceOrServer.removeMod(foundMod.get());
-
-                        if (castMod.id == Constants.CURSEFORGE_FABRIC_MOD_ID) {
-                            fabricApiWarningLabel.setVisible(true);
-                            installFabricApiButton.setVisible(true);
-                        }
-
-                        if (castMod.id == Constants.CURSEFORGE_LEGACY_FABRIC_MOD_ID) {
-                            legacyFabricApiWarningLabel.setVisible(true);
-                            installLegacyFabricApiButton.setVisible(true);
-                        }
-
-                        if (castMod.id == Constants.CURSEFORGE_FORGIFIED_FABRIC_API_MOD_ID) {
-                            forgifiedFabricApiWarningLabel.setVisible(true);
-                            installForgifiedFabricApiButton.setVisible(true);
-                        }
-                    }
-                }, listView, LoaderIndicators.forSection(LoaderIndicators.fromCurseForge(castMod), sectionValue)), gbc);
-
-                gbc.gridy++;
-            });
-
-            if (listView) {
-                addListFiller(gbc);
-            }
+            layOutResults(contentPanel, cards, view);
         }
 
         SwingUtilities.invokeLater(() -> jscrollPane.getVerticalScrollBar().setValue(0));
@@ -1153,134 +1112,186 @@ public final class AddModsDialog extends JDialog {
         repaint();
     }
 
+    /**
+     * A CurseForge result as Add Mods shows it, in the section it's shown for: its card or row, with Add opening the
+     * file selector, and Remove removing what's installed. Collections show CurseForge projects with it too.
+     *
+     * @param parent the window its dialogs belong to
+     */
+    CurseForgeProjectCard curseForgeCard(CurseForgeProject castMod, String sectionValue, ResultsView view,
+            Window parent) {
+        return new CurseForgeProjectCard(castMod, instanceOrServer, e -> {
+            if (sectionValue.equals("Plugins")) {
+                Analytics.trackEvent(AnalyticsEvent.forAddPlugin(castMod));
+            } else if (sectionValue.equals("Data Packs")) {
+                Analytics.trackEvent(AnalyticsEvent.forAddDataPack(castMod));
+            } else if (sectionValue.equals("Resource Packs")) {
+                Analytics.trackEvent(AnalyticsEvent.forAddResourcePack(castMod));
+            } else if (sectionValue.equals("Shaders")) {
+                Analytics.trackEvent(AnalyticsEvent.forAddShaders(castMod));
+            } else {
+                Analytics.trackEvent(AnalyticsEvent.forAddMod(castMod));
+            }
+
+            CurseForgeProjectFileSelectorDialog curseForgeProjectFileSelectorDialog = new CurseForgeProjectFileSelectorDialog(
+                    parent, castMod, instanceOrServer);
+            curseForgeProjectFileSelectorDialog.setVisible(true);
+        }, e -> {
+            if (sectionValue.equals("Plugins")) {
+                Analytics.trackEvent(AnalyticsEvent.forRemovePlugin(castMod));
+            } else if (sectionValue.equals("Data Packs")) {
+                Analytics.trackEvent(AnalyticsEvent.forRemoveDataPack(castMod));
+            } else if (sectionValue.equals("Resource Packs")) {
+                Analytics.trackEvent(AnalyticsEvent.forRemoveResourcePack(castMod));
+            } else if (sectionValue.equals("Shaders")) {
+                Analytics.trackEvent(AnalyticsEvent.forRemoveShaders(castMod));
+            } else {
+                Analytics.trackEvent(AnalyticsEvent.forRemoveMod(castMod));
+            }
+
+            Optional<DisableableMod> foundMod = instanceOrServer.getMods().stream()
+                    .filter(dm -> dm.isFromCurseForge() && dm.curseForgeProjectId == castMod.id)
+                    .findFirst();
+
+            if (foundMod.isPresent()) {
+                instanceOrServer.removeMod(foundMod.get());
+
+                if (castMod.id == Constants.CURSEFORGE_FABRIC_MOD_ID) {
+                    fabricApiWarningLabel.setVisible(true);
+                    installFabricApiButton.setVisible(true);
+                }
+
+                if (castMod.id == Constants.CURSEFORGE_LEGACY_FABRIC_MOD_ID) {
+                    legacyFabricApiWarningLabel.setVisible(true);
+                    installLegacyFabricApiButton.setVisible(true);
+                }
+
+                if (castMod.id == Constants.CURSEFORGE_FORGIFIED_FABRIC_API_MOD_ID) {
+                    forgifiedFabricApiWarningLabel.setVisible(true);
+                    installForgifiedFabricApiButton.setVisible(true);
+                }
+            }
+        }, view);
+    }
+
     private void setModrinthMods(List<ModrinthSearchHit> hits, boolean hasNext) {
         rerenderResults = () -> setModrinthMods(hits, hasNext);
-        boolean listView = App.settings.addModsViewMode == AddModsViewMode.LIST;
-
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.gridx = 0;
-        gbc.gridy = 0;
-        gbc.weightx = 1.0;
-        gbc.fill = GridBagConstraints.BOTH;
-        gbc.insets.set(2, 2, 2, 2);
-
-        contentPanel.removeAll();
+        ResultsView view = App.settings.addModsView();
 
         if (hits == null || hits.isEmpty()) {
+            contentPanel.removeAll();
             contentPanel.setLayout(new BorderLayout());
             contentPanel.add(new NoCurseModsPanel(!this.searchField.getText().isEmpty()), BorderLayout.CENTER);
         } else {
             prevButton.setEnabled(page > 0);
             nextButton.setEnabled(hasNext);
 
-            if (listView) {
-                contentPanel.setLayout(new GridBagLayout());
-                useListRowConstraints(gbc);
-            } else {
-                contentPanel.setLayout(new WrapLayout());
+            String sectionValue = Optional.ofNullable((ComboItem<String>) sectionComboBox.getSelectedItem())
+                    .map(ComboItem::getValue)
+                    .orElse("Mods");
+            List<JComponent> cards = new ArrayList<>();
+            for (ModrinthSearchHit hit : hits) {
+                cards.add(modrinthCard(hit, sectionValue, view, this));
             }
-
-            hits.forEach(mod -> {
-                ModrinthSearchHit castMod = mod;
-                String sectionValue = Optional.ofNullable((ComboItem<String>) sectionComboBox.getSelectedItem())
-                        .map(ComboItem::getValue)
-                        .orElse("Mods");
-
-                contentPanel.add(new ModrinthSearchHitCard(castMod, instanceOrServer, e -> {
-                    final ProgressDialog<ModrinthProject> modrinthProjectLookupDialog = new ProgressDialog<>(
-                            GetText.tr("Getting Mod Information"), 0, GetText.tr("Getting Mod Information"),
-                            "Aborting Getting Mod Information", this);
-
-                    modrinthProjectLookupDialog.addThread(new Thread(() -> {
-                        modrinthProjectLookupDialog.setReturnValue(ModrinthApi.getProject(castMod.projectId));
-
-                        modrinthProjectLookupDialog.close();
-                    }));
-
-                    modrinthProjectLookupDialog.start();
-
-                    ModrinthProject modrinthMod = modrinthProjectLookupDialog.getReturnValue();
-
-                    if (modrinthMod == null) {
-                        DialogManager.okDialog().setParent(this).setTitle(GetText.tr("Error Getting Mod Information"))
-                                .setContent(new HTMLBuilder().center().text(GetText.tr(
-                                        "There was an error getting mod information from Modrinth. Please try again later."))
-                                        .build())
-                                .setType(DialogManager.ERROR).show();
-                        return;
-                    }
-
-                    if (sectionValue.equals("Plugins")) {
-                        Analytics.trackEvent(AnalyticsEvent.forAddPlugin(castMod));
-                    } else if (sectionValue.equals("Data Packs")) {
-                        Analytics.trackEvent(AnalyticsEvent.forAddDataPack(castMod));
-                    } else if (sectionValue.equals("Resource Packs")) {
-                        Analytics.trackEvent(AnalyticsEvent.forAddResourcePack(castMod));
-                    } else if (sectionValue.equals("Shaders")) {
-                        Analytics.trackEvent(AnalyticsEvent.forAddShaders(castMod));
-                    } else {
-                        Analytics.trackEvent(AnalyticsEvent.forAddMod(castMod));
-                    }
-
-                    ModrinthVersionSelectorDialog modrinthVersionSelectorDialog = sectionValue.equals("Data Packs")
-                            ? new ModrinthVersionSelectorDialog(this, modrinthMod, instanceOrServer,
-                                    com.atlauncher.data.Type.datapack)
-                            : new ModrinthVersionSelectorDialog(this, modrinthMod, instanceOrServer);
-                    modrinthVersionSelectorDialog.setVisible(true);
-                }, e -> {
-                    if (sectionValue.equals("Plugins")) {
-                        Analytics.trackEvent(AnalyticsEvent.forRemovePlugin(castMod));
-                    } else if (sectionValue.equals("Data Packs")) {
-                        Analytics.trackEvent(AnalyticsEvent.forRemoveDataPack(castMod));
-                    } else if (sectionValue.equals("Resource Packs")) {
-                        Analytics.trackEvent(AnalyticsEvent.forRemoveResourcePack(castMod));
-                    } else if (sectionValue.equals("Shaders")) {
-                        Analytics.trackEvent(AnalyticsEvent.forRemoveShaders(castMod));
-                    } else {
-                        Analytics.trackEvent(AnalyticsEvent.forRemoveMod(castMod));
-                    }
-
-                    Optional<DisableableMod> foundMod = instanceOrServer.getMods().stream()
-                            .filter(dm -> dm.isFromModrinth() && dm.modrinthProject.id.equals(castMod.projectId))
-                            .findFirst();
-
-                    if (foundMod.isPresent()) {
-                        instanceOrServer.removeMod(foundMod.get());
-
-                        if (castMod.projectId.equals(Constants.MODRINTH_FABRIC_MOD_ID)) {
-                            fabricApiWarningLabel.setVisible(true);
-                            installFabricApiButton.setVisible(true);
-                        }
-
-                        if (castMod.projectId.equals(Constants.MODRINTH_LEGACY_FABRIC_MOD_ID)) {
-                            legacyFabricApiWarningLabel.setVisible(true);
-                            installLegacyFabricApiButton.setVisible(true);
-                        }
-
-                        if (castMod.projectId.equals(Constants.MODRINTH_QSL_MOD_ID)) {
-                            quiltStandardLibrariesWarningLabel.setVisible(true);
-                            installQuiltStandardLibrariesButton.setVisible(true);
-                        }
-
-                        if (castMod.projectId.equals(Constants.MODRINTH_FORGIFIED_FABRIC_API_MOD_ID)) {
-                            forgifiedFabricApiWarningLabel.setVisible(true);
-                            installForgifiedFabricApiButton.setVisible(true);
-                        }
-                    }
-                }, listView, LoaderIndicators.forSection(LoaderIndicators.fromModrinth(castMod), sectionValue)), gbc);
-
-                gbc.gridy++;
-            });
-
-            if (listView) {
-                addListFiller(gbc);
-            }
+            layOutResults(contentPanel, cards, view);
         }
 
         SwingUtilities.invokeLater(() -> jscrollPane.getVerticalScrollBar().setValue(0));
 
         revalidate();
         repaint();
+    }
+
+    /**
+     * A Modrinth result as Add Mods shows it, in the section it's shown for: its card or list row, with Add opening
+     * the version selector, and Remove removing what's installed. Collections show their projects with it too.
+     *
+     * @param parent the window its dialogs belong to
+     */
+    ModrinthSearchHitCard modrinthCard(ModrinthSearchHit castMod, String sectionValue, ResultsView view,
+            Window parent) {
+        return new ModrinthSearchHitCard(castMod, instanceOrServer, e -> {
+            final ProgressDialog<ModrinthProject> modrinthProjectLookupDialog = new ProgressDialog<>(
+                    GetText.tr("Getting Mod Information"), 0, GetText.tr("Getting Mod Information"),
+                    "Aborting Getting Mod Information", parent);
+
+            modrinthProjectLookupDialog.addThread(new Thread(() -> {
+                modrinthProjectLookupDialog.setReturnValue(ModrinthApi.getProject(castMod.projectId));
+
+                modrinthProjectLookupDialog.close();
+            }));
+
+            modrinthProjectLookupDialog.start();
+
+            ModrinthProject modrinthMod = modrinthProjectLookupDialog.getReturnValue();
+
+            if (modrinthMod == null) {
+                DialogManager.okDialog().setParent(parent).setTitle(GetText.tr("Error Getting Mod Information"))
+                        .setContent(new HTMLBuilder().center().text(GetText.tr(
+                                "There was an error getting mod information from Modrinth. Please try again later."))
+                                .build())
+                        .setType(DialogManager.ERROR).show();
+                return;
+            }
+
+            if (sectionValue.equals("Plugins")) {
+                Analytics.trackEvent(AnalyticsEvent.forAddPlugin(castMod));
+            } else if (sectionValue.equals("Data Packs")) {
+                Analytics.trackEvent(AnalyticsEvent.forAddDataPack(castMod));
+            } else if (sectionValue.equals("Resource Packs")) {
+                Analytics.trackEvent(AnalyticsEvent.forAddResourcePack(castMod));
+            } else if (sectionValue.equals("Shaders")) {
+                Analytics.trackEvent(AnalyticsEvent.forAddShaders(castMod));
+            } else {
+                Analytics.trackEvent(AnalyticsEvent.forAddMod(castMod));
+            }
+
+            ModrinthVersionSelectorDialog modrinthVersionSelectorDialog = sectionValue.equals("Data Packs")
+                    ? new ModrinthVersionSelectorDialog(parent, modrinthMod, instanceOrServer,
+                            com.atlauncher.data.Type.datapack)
+                    : new ModrinthVersionSelectorDialog(parent, modrinthMod, instanceOrServer);
+            modrinthVersionSelectorDialog.setVisible(true);
+        }, e -> {
+            if (sectionValue.equals("Plugins")) {
+                Analytics.trackEvent(AnalyticsEvent.forRemovePlugin(castMod));
+            } else if (sectionValue.equals("Data Packs")) {
+                Analytics.trackEvent(AnalyticsEvent.forRemoveDataPack(castMod));
+            } else if (sectionValue.equals("Resource Packs")) {
+                Analytics.trackEvent(AnalyticsEvent.forRemoveResourcePack(castMod));
+            } else if (sectionValue.equals("Shaders")) {
+                Analytics.trackEvent(AnalyticsEvent.forRemoveShaders(castMod));
+            } else {
+                Analytics.trackEvent(AnalyticsEvent.forRemoveMod(castMod));
+            }
+
+            Optional<DisableableMod> foundMod = instanceOrServer.getMods().stream()
+                    .filter(dm -> dm.isFromModrinth() && dm.modrinthProject.id.equals(castMod.projectId))
+                    .findFirst();
+
+            if (foundMod.isPresent()) {
+                instanceOrServer.removeMod(foundMod.get());
+
+                if (castMod.projectId.equals(Constants.MODRINTH_FABRIC_MOD_ID)) {
+                    fabricApiWarningLabel.setVisible(true);
+                    installFabricApiButton.setVisible(true);
+                }
+
+                if (castMod.projectId.equals(Constants.MODRINTH_LEGACY_FABRIC_MOD_ID)) {
+                    legacyFabricApiWarningLabel.setVisible(true);
+                    installLegacyFabricApiButton.setVisible(true);
+                }
+
+                if (castMod.projectId.equals(Constants.MODRINTH_QSL_MOD_ID)) {
+                    quiltStandardLibrariesWarningLabel.setVisible(true);
+                    installQuiltStandardLibrariesButton.setVisible(true);
+                }
+
+                if (castMod.projectId.equals(Constants.MODRINTH_FORGIFIED_FABRIC_API_MOD_ID)) {
+                    forgifiedFabricApiWarningLabel.setVisible(true);
+                    installForgifiedFabricApiButton.setVisible(true);
+                }
+            }
+        }, view);
     }
 
     private void addSectionAndSortOptions(boolean firstTime) {
