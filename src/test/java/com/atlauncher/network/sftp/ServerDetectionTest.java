@@ -117,6 +117,20 @@ class ServerDetectionTest {
     }
 
     @Test
+    void forge1710JarAndLibraryFolderAgreeOnTheVersion() throws IOException {
+        write("forge-1.7.10-10.13.4.1614-1.7.10-universal.jar", "jar");
+        write("minecraft_server.1.7.10.jar", "jar");
+        folder("libraries/net/minecraftforge/forge/1.7.10-10.13.4.1614-1.7.10");
+
+        ServerDetection.Info info = detect();
+
+        assertEquals(LoaderType.FORGE, info.loader);
+        // as the launcher names Forge versions, so an instance made from it finds this one
+        assertEquals("10.13.4.1614", info.loaderVersion);
+        assertEquals("1.7.10", info.minecraftVersion);
+    }
+
+    @Test
     void serverPacksThatHaveNotBeenInstalledYet() throws IOException {
         write("variables.txt", "# comment\nMINECRAFT_VERSION=1.20.1\nMODLOADER=Forge\nMODLOADER_VERSION=47.2.0\n");
         ServerDetection.Info packCreator = detect();

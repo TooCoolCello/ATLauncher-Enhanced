@@ -115,7 +115,8 @@ public final class ServerImportDialog extends JDialog {
         super(parent, GetText.tr("Import from a Server"), ModalityType.DOCUMENT_MODAL);
         setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
 
-        setServers(servers, preselected);
+        // preselected comes from another copy of the list, and the combo box only selects its own objects
+        setServers(servers, preselected == null ? null : RemoteServer.find(servers, preselected.id));
         fromFile.setSelected(servers.isEmpty());
         ButtonGroup group = new ButtonGroup();
         group.add(fromRemote);
@@ -163,11 +164,11 @@ public final class ServerImportDialog extends JDialog {
         gbc.fill = GridBagConstraints.NONE;
         form.add(browse, gbc);
 
+        // Import turns into Cancel, so the second click of a double click mustn't cancel what the first started
+        start.setMultiClickThreshhold(500);
         start.addActionListener(e -> {
             if (busy) {
-                cancelRequested = true;
-                start.setEnabled(false);
-                status.setText(GetText.tr("Cancelling..."));
+                cancel();
             } else {
                 start();
             }
@@ -177,7 +178,7 @@ public final class ServerImportDialog extends JDialog {
             @Override
             public void windowClosing(WindowEvent e) {
                 if (busy) {
-                    cancelRequested = true;
+                    cancel();
                 } else {
                     dispose();
                 }
@@ -223,6 +224,12 @@ public final class ServerImportDialog extends JDialog {
         close.setEnabled(!busy);
         start.setText(busy ? GetText.tr("Cancel") : GetText.tr("Import"));
         start.setEnabled(true);
+    }
+
+    private void cancel() {
+        cancelRequested = true;
+        start.setEnabled(false);
+        status.setText(GetText.tr("Cancelling..."));
     }
 
     private void browse() {
@@ -273,7 +280,7 @@ public final class ServerImportDialog extends JDialog {
                 importFrom(remote, source, work);
             } catch (InterruptedIOException e) {
                 setStatus(GetText.tr("Import cancelled."));
-            } catch (IOException e) {
+            } catch (IOException | RuntimeException e) {
                 LogManager.logStackTrace("Couldn't import from the server", e);
                 setStatus(GetText.tr("The import failed."));
                 RemoteServerConnect.showError(this, GetText.tr("Import from a Server"), e);

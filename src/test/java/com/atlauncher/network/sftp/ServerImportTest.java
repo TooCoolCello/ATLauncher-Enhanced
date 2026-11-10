@@ -27,6 +27,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -57,6 +58,36 @@ class ServerImportTest {
             return walk.filter(Files::isRegularFile).map(p -> folder.relativize(p).toString().replace('\\', '/'))
                 .sorted().collect(Collectors.toList());
         }
+    }
+
+    // a server folder that also lists a file whose name this computer can't use (NUL is refused everywhere)
+    static LocalDirSftpClient withUnusableName(Path server, String folder, String name) {
+        return new LocalDirSftpClient(server) {
+            @Override
+            public List<RemoteFile> list(String path) throws IOException {
+                List<RemoteFile> files = new ArrayList<>(super.list(path));
+                if (path.endsWith("/" + folder)) {
+                    files.add(new RemoteFile(name, path + "/" + name, 3, 0, false));
+                }
+                return files;
+            }
+        };
+    }
+
+    @Test
+    void gatherLeavesOutNamesThisComputerCantUse() throws IOException {
+        Path server = temp.resolve("server");
+        write(server.resolve("mods/create.jar"), "create");
+        write(server.resolve("config/create-common.toml"), "common");
+        Path folder = temp.resolve("import");
+
+        ServerImport.Gathered gathered = ServerImport.gather(withUnusableName(server, "config", "bad\0name.toml"),
+            "/", folder, message -> true);
+
+        assertEquals(1, gathered.mods);
+        assertEquals(1, gathered.files);
+        assertEquals(Arrays.asList("config/create-common.toml", "mods/create.jar"),
+            files(folder.resolve("overrides")));
     }
 
     @Test

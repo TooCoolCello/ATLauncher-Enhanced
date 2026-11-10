@@ -20,6 +20,7 @@ package com.atlauncher.network.sftp;
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -245,7 +246,13 @@ public final class ServerSync {
         Map<Path, String> downloaded = new LinkedHashMap<>();
         for (SftpClient.RemoteFile file : remote.values()) {
             check(step, GetText.tr("Checking {0} on the server...", file.name));
-            Path target = folder.resolve(file.name).normalize();
+            Path target;
+            try {
+                target = folder.resolve(file.name).normalize();
+            } catch (InvalidPathException e) {
+                // a name this computer doesn't allow, such as one with a colon on Windows: it stays a removal
+                continue;
+            }
             // a name the server allows can still mean a path here, such as one with backslashes on Windows
             if (!folder.equals(target.getParent())) {
                 continue;

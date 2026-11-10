@@ -89,7 +89,8 @@ public class RemoteServer {
         name = trim(name);
         username = trim(username);
         privateKeyPath = trim(privateKeyPath);
-        remotePath = getRemotePath();
+        // SFTP paths use forward slashes; JSch would read a backslash as an escape and upload somewhere else
+        remotePath = getRemotePath().replace('\\', '/');
         String h = trim(host);
         if (h != null) {
             if (h.toLowerCase(Locale.ENGLISH).startsWith("sftp://")) {

@@ -20,6 +20,7 @@ package com.atlauncher.network.sftp;
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -126,7 +127,14 @@ public final class ServerImport {
             if (!step.test(GetText.tr("Downloading {0}...", file.getKey()))) {
                 throw new InterruptedIOException("Cancelled");
             }
-            Path target = overrides.resolve(file.getKey()).normalize();
+            Path target;
+            try {
+                target = overrides.resolve(file.getKey()).normalize();
+            } catch (InvalidPathException e) {
+                // a name the server allows but this computer doesn't, such as one with a colon on Windows
+                LogManager.warn("Left out " + file.getKey() + " from the server: its name can't be used here");
+                continue;
+            }
             if (!target.startsWith(overrides)) {
                 continue;
             }

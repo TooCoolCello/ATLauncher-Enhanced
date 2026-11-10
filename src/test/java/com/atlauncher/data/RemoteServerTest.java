@@ -76,6 +76,15 @@ class RemoteServerTest {
     }
 
     @Test
+    void serverFolderTypedWithBackslashesUsesForwardSlashes() {
+        RemoteServer server = server("node.example.com");
+        server.remotePath = " \\home\\mc\\server ";
+        server.normalise();
+
+        assertEquals("/home/mc/server", server.remotePath);
+    }
+
+    @Test
     void invalidEntriesSayWhatsWrong() {
         RemoteServer badPort = server("node.example.com:abc");
         badPort.normalise();

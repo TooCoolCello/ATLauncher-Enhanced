@@ -21,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayOutputStream;
@@ -41,6 +42,7 @@ import com.atlauncher.data.RemoteServer;
 import com.jcraft.jsch.HostKeyRepository;
 import com.jcraft.jsch.JSch;
 import com.jcraft.jsch.JSchException;
+import com.jcraft.jsch.KeyPair;
 
 /**
  * Trust on first use, checked against JSch's real known_hosts handling, without a network.
@@ -173,6 +175,27 @@ class JschSftpClientTest {
         assertTrue(print.startsWith("SHA256:"));
         assertEquals(7 + 43, print.length());
         assertFalse(print.endsWith("="));
+    }
+
+    @Test
+    void aRememberedPassphraseTheKeyNoLongerTakesIsAnAuthFailure() throws Exception {
+        Path keyFile = temp.resolve("id_rsa");
+        KeyPair pair = KeyPair.genKeyPair(new JSch(), KeyPair.RSA, 2048);
+        pair.writePrivateKey(keyFile.toString(), "changed".getBytes(StandardCharsets.UTF_8));
+        pair.dispose();
+        RemoteServer server = new RemoteServer();
+        server.host = "node.example.com";
+        server.port = 2022;
+        server.username = "name.1a2b3c4d";
+        server.auth = RemoteServer.Auth.KEY;
+        server.privateKeyPath = keyFile.toString();
+
+        // fails before any network: so it's forgotten and asked for again, not blamed on the key file
+        IOException wrong = assertThrows(IOException.class, () -> JschSftpClient.connect(server,
+            "remembered".getBytes(StandardCharsets.UTF_8), temp.resolve("known_hosts"), null));
+
+        assertInstanceOf(JschSftpClient.AuthFailedException.class, wrong);
+        assertTrue(wrong.getMessage().contains(keyFile.toString()));
     }
 
     @Test

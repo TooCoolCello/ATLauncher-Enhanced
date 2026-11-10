@@ -145,6 +145,8 @@ public final class RemoteServerUploadDialog extends JDialog {
 
         addFiles.setToolTipText(GetText.tr("Choose more files or folders from inside the instance"));
         addFiles.addActionListener(e -> chooseFiles());
+        // Upload turns into Cancel, so the second click of a double click mustn't cancel what the first started
+        upload.setMultiClickThreshhold(500);
         upload.addActionListener(e -> {
             if (busy) {
                 cancel();
@@ -344,7 +346,7 @@ public final class RemoteServerUploadDialog extends JDialog {
                 return !cancelRequested;
             });
             showResult(result, items.size());
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
             LogManager.logStackTrace("Couldn't upload to the remote server", e);
             setStatus(GetText.tr("The upload failed."));
             RemoteServerConnect.showError(this, GetText.tr("Upload to Remote Server"), e);
