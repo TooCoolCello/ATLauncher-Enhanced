@@ -100,6 +100,44 @@ Verification:
   These rely on the automated coverage.
 - `.idea/gradle.xml` is an unrelated local modification. **Never stage it with this work.**
 
+### Edit Mods update icons and sorting
+
+**Branch:** `feature/edit-mods-update-sort` (based on `feature/defaultconfigs-manage`).
+
+- Opening Edit Mods checks every CurseForge/Modrinth mod for updates in the background and shows a
+  green arrow beside the check box of each mod with one. `data/BulkUpdateCheck.java` settles most mods
+  in a few requests (CurseForge `POST /mods` `latestFilesIndexes`; Modrinth `POST /version_files/update`
+  per loader group, using the stored SHA-1). It only settles what it can be sure of; the rest get
+  `DisableableMod.fetchUpdateStatus`, the same platform, restriction and Sinytra loader-path rules as
+  Check For Updates, 4 at a time. Results last for the open dialog only; Refresh keeps them.
+- Sort By: Name, Date Added (newest first, from the file's creation time, so updating a mod counts as
+  adding it again), Update Available. Re-sorting keeps the rows,
+  so selections survive. The choice is remembered until the launcher closes.
+- Layout: opens at 1000x700 (capped to the screen), each list has its header above it, and one
+  draggable divider splits Enabled and Disabled (both grow equally with the window). Refresh rescans
+  the mod folders (`scanMissingMods`) and only checks mods that are new.
+- Speed: `Utils.moveFile` / `FileUtils.moveFile` rename first (instant on the same drive, keeps the
+  creation time) and only fall back to copy + delete. Row right-click menus are built on demand
+  instead of for every row on every reload.
+- Startup not touched yet: run `run-test-build.bat --debug --debug-level=5` and read the
+  `PerformanceManager` "took N ms" lines in `logs/` to find what is actually slow first.
+- `gradlew runShared` runs the fork on the installed ATLauncher's data folder
+  (`%APPDATA%\ATLauncher`, or `-PatlauncherDir=...`) with launcher self-update off. Close the real
+  ATLauncher first. Fork-only settings and instance fields are dropped whenever the real launcher saves.
+
+Files: `gui/dialogs/EditModsDialog.java`, `data/DisableableMod.java`, `gui/components/ModsJCheckBox.java`,
+`src/main/resources/assets/icon/update.svg`, `build.gradle`. Test: `EditModsDialogSortTest`.
+
+Verification: the Test Build workflow compiled it and passed all unit tests (Java 17), including the
+new sort test. **Not tested by hand yet:** open Edit Mods on a big instance and check the icons,
+the progress label and each sort order.
+
+### Test builds without IntelliJ
+
+`.github/workflows/test-build.yml` tests and builds every push to `feature/**` or `fix/**`, then
+replaces the `test-build` pre-release with `ATLauncher-Enhanced.jar`. `scripts/run-test-build.bat`
+downloads that jar and runs it on `%APPDATA%\ATLauncher` with ATLauncher's bundled Java.
+
 ## 3. Implemented locally but not yet committed
 
 Nothing at present.

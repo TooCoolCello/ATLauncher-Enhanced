@@ -121,6 +121,21 @@ application {
     ]
 }
 
+// Runs this fork on the installed ATLauncher's data folder (instances, servers, accounts and settings), so both
+// launchers see the same instances. Close the real ATLauncher first: both write the same files.
+// Another folder: gradlew runShared -PatlauncherDir="D:/Games/ATLauncher"
+tasks.register('runShared', JavaExec) {
+    group = 'application'
+    description = 'Runs the launcher on the installed ATLauncher data folder'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass.set(application.mainClass)
+    jvmArgs application.applicationDefaultJvmArgs
+
+    def atlauncherDir = findProperty('atlauncherDir') ?: "${System.getenv('APPDATA')}/ATLauncher"
+    // no self-update, so the fork never replaces anything in the real launcher's folder
+    args "--working-dir=${atlauncherDir}", '--no-launcher-update'
+}
+
 test {
     if (JavaVersion.current().isJava9Compatible()) {
         jvmArgs '--add-opens=java.base/sun.security.x509=ALL-UNNAMED'

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <!-- #59A869 is FlatLaf's Actions.Green, so the theme recolours it for light and dark -->
+  <circle cx="8" cy="8" r="7" fill="#59A869"/>
+  <path fill="#FFFFFF" d="M8 3.5 12 8H9.5v4.5h-3V8H4z"/>
+</svg>
