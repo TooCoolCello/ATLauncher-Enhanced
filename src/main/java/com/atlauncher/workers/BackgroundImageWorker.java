@@ -23,6 +23,7 @@ import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 
 import javax.imageio.ImageIO;
@@ -124,6 +125,8 @@ public class BackgroundImageWorker extends SwingWorker<ImageIcon, Object> {
             if (icon != null) {
                 label.setIcon(icon);
             }
+        } catch (CancellationException e) {
+            // its result was taken off the page before the image loaded
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } catch (ExecutionException e) {

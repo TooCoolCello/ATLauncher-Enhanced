@@ -23,6 +23,8 @@ import java.awt.FlowLayout;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Window;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -247,9 +249,7 @@ public final class AddModsDialog extends JDialog {
 
         this.warningPanel.setLayout(new BoxLayout(this.warningPanel, BoxLayout.X_AXIS));
 
-        JPanel searchButtonsPanel = new JPanel();
-
-        searchButtonsPanel.setLayout(new BoxLayout(searchButtonsPanel, BoxLayout.X_AXIS));
+        JPanel searchButtonsPanel = searchRow();
         searchButtonsPanel.add(this.hostComboBox);
         searchButtonsPanel.add(Box.createHorizontalStrut(5));
         searchButtonsPanel.add(this.sectionComboBox);
@@ -263,8 +263,11 @@ public final class AddModsDialog extends JDialog {
         searchButtonsPanel.add(this.collectionsButton);
         this.collectionsButton.setToolTipText(GetText.tr("Your collections of CurseForge and Modrinth projects, and "
                 + "Modrinth collections you've opened or saved"));
-        this.collectionsButton.addActionListener(
-                e -> new CollectionsDialog(this, instanceOrServer).setVisible(true));
+        this.collectionsButton.addActionListener(e -> {
+            new CollectionsDialog(this, instanceOrServer).setVisible(true);
+            // what was added there shows as installed here
+            refreshInstalled();
+        });
         // only where Add Mods has a Mods section
         LoaderVersion packModsLoader = instanceOrServer.getLoaderVersion();
         if (packModsLoader != null && !packModsLoader.isPaper() && !packModsLoader.isPurpur()) {
@@ -275,9 +278,7 @@ public final class AddModsDialog extends JDialog {
             this.fromModpackButton.addActionListener(e -> {
                 new PackModsDialog(this, instanceOrServer).setVisible(true);
                 // what was added shows as installed
-                if (rerenderResults != null) {
-                    rerenderResults.run();
-                }
+                rerender();
             });
         }
 
@@ -825,6 +826,28 @@ public final class AddModsDialog extends JDialog {
         this.searchField.addActionListener(e -> searchForMods());
     }
 
+    /**
+     * The row of search controls: on one line where it fits, wrapping onto a second where it doesn't. With Collections
+     * and From Modpack in it, it needs more than the dialog's 800px, and one squeezed line left the search field a
+     * sliver and cut off the last button.
+     */
+    static JPanel searchRow() {
+        JPanel row = new JPanel(new WrapLayout(FlowLayout.LEADING, 0, 2));
+        // how many lines it takes depends on the width it's given, so lay out again once that's known
+        row.addComponentListener(new ComponentAdapter() {
+            private int laidOutWidth = -1;
+
+            @Override
+            public void componentResized(ComponentEvent e) {
+                if (row.getWidth() != laidOutWidth) {
+                    laidOutWidth = row.getWidth();
+                    row.revalidate();
+                }
+            }
+        });
+        return row;
+    }
+
     private void setLoading(boolean loading) {
         if (loading) {
             rerenderResults = null;
@@ -1074,8 +1097,31 @@ public final class AddModsDialog extends JDialog {
         App.settings.addModsView = view;
         App.settings.save();
 
+        rerender();
+    }
+
+    /**
+     * Redraws the results shown, if any. The old cards' compatibility checks are dropped rather than left queued
+     * ahead of the new cards' (what they fetched is kept), so the redrawn marks don't wait for checks nobody sees.
+     */
+    private void rerender() {
         if (rerenderResults != null) {
+            fetchGeneration.incrementAndGet();
             rerenderResults.run();
+        }
+    }
+
+    /**
+     * Shows what's installed now on this page's results: an install also adds dependencies, which may be results
+     * here, and Collections and Related add through these same cards from their own windows.
+     */
+    private void refreshInstalled() {
+        for (JComponent result : pageResults.keySet()) {
+            if (result instanceof CurseForgeProjectCard) {
+                ((CurseForgeProjectCard) result).updateInstalledStatus();
+            } else if (result instanceof ModrinthSearchHitCard) {
+                ((ModrinthSearchHitCard) result).updateInstalledStatus();
+            }
         }
     }
 
@@ -1185,6 +1231,7 @@ public final class AddModsDialog extends JDialog {
             CurseForgeProjectFileSelectorDialog curseForgeProjectFileSelectorDialog = new CurseForgeProjectFileSelectorDialog(
                     parent, castMod, instanceOrServer);
             curseForgeProjectFileSelectorDialog.setVisible(true);
+            refreshInstalled();
         }, e -> {
             if (sectionValue.equals("Plugins")) {
                 Analytics.trackEvent(AnalyticsEvent.forRemovePlugin(castMod));
@@ -1219,6 +1266,7 @@ public final class AddModsDialog extends JDialog {
                     forgifiedFabricApiWarningLabel.setVisible(true);
                     installForgifiedFabricApiButton.setVisible(true);
                 }
+                refreshInstalled();
             }
         }, view, LoaderIndicators.forSection(LoaderIndicators.fromCurseForge(castMod), sectionValue));
 
@@ -1226,7 +1274,11 @@ public final class AddModsDialog extends JDialog {
         card.compatibility().setVerdict(ModCompatibility.forCurseForgeProject(
                 ModCompatibility.Target.of(instanceOrServer), sectionValue, castMod));
         if (sectionValue.equals("Mods")) {
-            RelatedModsDialog.offer(card, () -> RelatedModsDialog.open(parent, this, instanceOrServer, castMod));
+            RelatedModsDialog.offer(card, () -> {
+                RelatedModsDialog.open(parent, this, instanceOrServer, castMod);
+                // whatever was added there, by any of its routes, shows as installed here
+                refreshInstalled();
+            });
         }
         return card;
     }
@@ -1271,6 +1323,15 @@ public final class AddModsDialog extends JDialog {
      */
     ModrinthSearchHitCard modrinthCard(ModrinthSearchHit castMod, String sectionValue, ResultsView view,
             Window parent) {
+        // another window's (Related) checks stop when it closes; this one's own stop on a new fetch or on closing
+        return modrinthCard(castMod, sectionValue, view, parent, parent == this ? () -> true : parent::isDisplayable);
+    }
+
+    /**
+     * @param shown whether the window it's in still shows it; its compatibility check is dropped once it doesn't
+     */
+    ModrinthSearchHitCard modrinthCard(ModrinthSearchHit castMod, String sectionValue, ResultsView view,
+            Window parent, BooleanSupplier shown) {
         ModrinthSearchHitCard card = new ModrinthSearchHitCard(castMod, instanceOrServer, e -> {
             final ProgressDialog<ModrinthProject> modrinthProjectLookupDialog = new ProgressDialog<>(
                     GetText.tr("Getting Mod Information"), 0, GetText.tr("Getting Mod Information"),
@@ -1312,6 +1373,7 @@ public final class AddModsDialog extends JDialog {
                             com.atlauncher.data.Type.datapack)
                     : new ModrinthVersionSelectorDialog(parent, modrinthMod, instanceOrServer);
             modrinthVersionSelectorDialog.setVisible(true);
+            refreshInstalled();
         }, e -> {
             if (sectionValue.equals("Plugins")) {
                 Analytics.trackEvent(AnalyticsEvent.forRemovePlugin(castMod));
@@ -1351,12 +1413,13 @@ public final class AddModsDialog extends JDialog {
                     forgifiedFabricApiWarningLabel.setVisible(true);
                     installForgifiedFabricApiButton.setVisible(true);
                 }
+                refreshInstalled();
             }
         }, view, LoaderIndicators.forSection(LoaderIndicators.fromModrinth(castMod), sectionValue));
 
         // checked in the background unless the search result settles it; dropped once another search replaces it
         int generation = fetchGeneration.get();
-        BooleanSupplier stillShown = () -> generation == fetchGeneration.get();
+        BooleanSupplier stillShown = () -> generation == fetchGeneration.get() && shown.getAsBoolean();
         card.compatibility().setVerdict(compatibilityChecker.modrinth(ModCompatibility.Target.of(instanceOrServer),
                 sectionValue, castMod, stillShown, verdict -> SwingUtilities.invokeLater(() -> {
                     if (stillShown.getAsBoolean()) {
@@ -1365,7 +1428,11 @@ public final class AddModsDialog extends JDialog {
                     }
                 })));
         if (sectionValue.equals("Mods")) {
-            RelatedModsDialog.offer(card, () -> RelatedModsDialog.open(parent, this, instanceOrServer, castMod));
+            RelatedModsDialog.offer(card, () -> {
+                RelatedModsDialog.open(parent, this, instanceOrServer, castMod);
+                // whatever was added there, by any of its routes, shows as installed here
+                refreshInstalled();
+            });
         }
         return card;
     }
@@ -1392,6 +1459,8 @@ public final class AddModsDialog extends JDialog {
 
     @Override
     public void dispose() {
+        // a search still loading isn't shown, and nothing more is checked, once this has closed
+        fetchGeneration.incrementAndGet();
         compatibilityChecker.shutdown();
         super.dispose();
     }

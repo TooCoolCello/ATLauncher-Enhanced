@@ -22,11 +22,14 @@ import java.awt.CardLayout;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
+import java.awt.GraphicsEnvironment;
+import java.awt.Rectangle;
 import java.awt.event.KeyEvent;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultListCellRenderer;
@@ -57,6 +60,7 @@ import com.atlauncher.data.modrinth.ModrinthCollection;
 import com.atlauncher.data.modrinth.ModrinthProject;
 import com.atlauncher.data.modrinth.ModrinthSearchHit;
 import com.atlauncher.gui.components.ResultsViewPicker;
+import com.atlauncher.gui.components.WrappingLabel;
 import com.atlauncher.managers.DialogManager;
 import com.atlauncher.managers.LogManager;
 import com.atlauncher.utils.CollectionsLibrary;
@@ -80,6 +84,8 @@ import com.atlauncher.utils.ModrinthCollections.State;
 public final class CollectionsDialog extends JDialog {
     private static final String PROJECTS = "projects";
     private static final String MESSAGE = "message";
+    // Swing's switch for showing a label's text as written even when it starts with <html>
+    static final String HTML_DISABLE = "html.disable";
     // the results' side of the window; rows are laid out to fit in this, less the scroll bar
     static final int RESULTS_MIN_WIDTH = 460;
 
@@ -131,9 +137,10 @@ public final class CollectionsDialog extends JDialog {
     private final JPanel creatorArea = new JPanel(creatorCards);
 
     private final JLabel title = new JLabel();
-    private final JLabel description = new JLabel();
+    // both wrap to the width they're given, however narrow the window
+    private final WrappingLabel description = new WrappingLabel();
     private final JPanel results = new JPanel();
-    private final JLabel notAddable = new JLabel();
+    private final WrappingLabel notAddable = new WrappingLabel();
     private final JLabel message = new JLabel("", SwingConstants.CENTER);
     private final CardLayout cards = new CardLayout();
     private final JPanel projectArea = new JPanel(cards);
@@ -149,6 +156,8 @@ public final class CollectionsDialog extends JDialog {
     // each lookup's number, so only the latest is shown
     private int generation = 0;
     private int creatorGeneration = 0;
+    // which cards are shown; compatibility checks for cards replaced since, or after closing, are dropped
+    private final AtomicInteger cardsShown = new AtomicInteger();
 
     public CollectionsDialog(AddModsDialog addMods, ModManagement instanceOrServer) {
         super(addMods, GetText.tr("Collections"), ModalityType.DOCUMENT_MODAL);
@@ -157,7 +166,9 @@ public final class CollectionsDialog extends JDialog {
 
         setDefaultCloseOperation(DISPOSE_ON_CLOSE);
         setMinimumSize(new Dimension(760, 460));
-        setSize(1000, 640);
+        // never larger than the screen's usable area (HiDPI scaling shrinks it), so Close stays on screen
+        Rectangle screen = GraphicsEnvironment.getLocalGraphicsEnvironment().getMaximumWindowBounds();
+        setSize(Math.min(1000, screen.width), Math.min(640, screen.height));
         setLocationRelativeTo(addMods);
 
         input.putClientProperty("JTextField.placeholderText", GetText.tr("Modrinth collection link or ID"));
@@ -188,6 +199,8 @@ public final class CollectionsDialog extends JDialog {
         projectArea.add(projectsPanel, PROJECTS);
         projectArea.add(message, MESSAGE);
 
+        // a collection's name is whatever its Modrinth user called it
+        title.putClientProperty(HTML_DISABLE, Boolean.TRUE);
         description.setEnabled(false);
         JPanel heading = new JPanel(new BorderLayout(0, 2));
         heading.add(title, BorderLayout.NORTH);
@@ -244,10 +257,12 @@ public final class CollectionsDialog extends JDialog {
         library.modrinthCollections().forEach(collection -> libraryModel.addElement(new Entry(null, collection)));
     }
 
-    private JPanel libraryPanel() {
-        libraryList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        libraryList.getAccessibleContext().setAccessibleName(GetText.tr("Library"));
-        libraryList.setCellRenderer(new DefaultListCellRenderer() {
+    /**
+     * Shows a library entry by its name and size. Names come from Modrinth's users or the library file, so they're
+     * shown as written, never as HTML.
+     */
+    static DefaultListCellRenderer libraryRenderer() {
+        DefaultListCellRenderer renderer = new DefaultListCellRenderer() {
             @Override
             public Component getListCellRendererComponent(JList<?> list, Object value, int index,
                 boolean isSelected, boolean cellHasFocus) {
@@ -259,7 +274,41 @@ public final class CollectionsDialog extends JDialog {
                         entry.modrinth.projectCount);
                 return super.getListCellRendererComponent(list, text, index, isSelected, cellHasFocus);
             }
-        });
+        };
+        renderer.putClientProperty(HTML_DISABLE, Boolean.TRUE);
+        return renderer;
+    }
+
+    /**
+     * Shows one of a creator's collections by its name and size, with its description as the tooltip. Any Modrinth
+     * user names and describes their collections, so neither is ever taken as HTML, which could fetch images from
+     * anywhere.
+     */
+    static DefaultListCellRenderer creatorRenderer() {
+        DefaultListCellRenderer renderer = new DefaultListCellRenderer() {
+            @Override
+            public Component getListCellRendererComponent(JList<?> list, Object value, int index,
+                boolean isSelected, boolean cellHasFocus) {
+                ModrinthCollection collection = (ModrinthCollection) value;
+                int count = collection.projects == null ? 0 : collection.projects.size();
+                String name = collection.name == null ? collection.id : collection.name;
+                // #. {0} is a collection's name, {1} how many projects it has
+                JLabel label = (JLabel) super.getListCellRendererComponent(list,
+                    GetText.tr("{0} ({1} projects)", name, count), index, isSelected, cellHasFocus);
+                // the list shows its renderer's tooltip itself, without the renderer's HTML setting
+                label.setToolTipText(collection.description == null || collection.description.isEmpty() ? null
+                    : "<html>" + escape(collection.description) + "</html>");
+                return label;
+            }
+        };
+        renderer.putClientProperty(HTML_DISABLE, Boolean.TRUE);
+        return renderer;
+    }
+
+    private JPanel libraryPanel() {
+        libraryList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        libraryList.getAccessibleContext().setAccessibleName(GetText.tr("Library"));
+        libraryList.setCellRenderer(libraryRenderer());
         libraryList.addListSelectionListener(e -> {
             Entry selected = libraryList.getSelectedValue();
             if (!e.getValueIsAdjusting() && selected != null) {
@@ -296,20 +345,7 @@ public final class CollectionsDialog extends JDialog {
 
         creatorList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         creatorList.getAccessibleContext().setAccessibleName(GetText.tr("The creator's collections"));
-        creatorList.setCellRenderer(new DefaultListCellRenderer() {
-            @Override
-            public Component getListCellRendererComponent(JList<?> list, Object value, int index,
-                boolean isSelected, boolean cellHasFocus) {
-                ModrinthCollection collection = (ModrinthCollection) value;
-                int count = collection.projects == null ? 0 : collection.projects.size();
-                String name = collection.name == null ? collection.id : collection.name;
-                // #. {0} is a collection's name, {1} how many projects it has
-                JLabel label = (JLabel) super.getListCellRendererComponent(list,
-                    GetText.tr("{0} ({1} projects)", name, count), index, isSelected, cellHasFocus);
-                label.setToolTipText(collection.description);
-                return label;
-            }
-        });
+        creatorList.setCellRenderer(creatorRenderer());
         creatorList.addListSelectionListener(e -> {
             ModrinthCollection selected = creatorList.getSelectedValue();
             if (!e.getValueIsAdjusting() && selected != null && (shown == null || !shown.id.equals(selected.id))) {
@@ -388,6 +424,7 @@ public final class CollectionsDialog extends JDialog {
     // a Modrinth collection, off the event dispatch thread; only the latest lookup is shown
     private void lookUp(String id) {
         int lookup = ++generation;
+        cardsShown.incrementAndGet();
         shown = null;
         shownLocal = null;
         title.setText(GetText.tr("Modrinth collection {0}", id));
@@ -410,6 +447,7 @@ public final class CollectionsDialog extends JDialog {
     // one of the launcher's own collections, each project from its own provider
     private void openLocal(LocalCollection collection) {
         int lookup = ++generation;
+        cardsShown.incrementAndGet();
         shown = null;
         shownLocal = null;
         title.setText(collection.name);
@@ -452,7 +490,7 @@ public final class CollectionsDialog extends JDialog {
             about = about + (about.isEmpty() ? "" : " ") + GetText.tr("{0} project(s) in it couldn't be found, such as "
                 + "private or deleted ones.", lookup.missing);
         }
-        description.setText(about.isEmpty() ? "" : "<html><div style='width:640px'>" + escape(about) + "</div></html>");
+        description.setWrappedText(about.isEmpty() ? null : escape(about));
 
         if (lookup.state == State.EMPTY) {
             showMessage(GetText.tr("This collection has no projects."));
@@ -495,7 +533,9 @@ public final class CollectionsDialog extends JDialog {
 
     private void renderShown() {
         ResultsView view = App.settings.collectionsView();
-        ModrinthCards modrinthCards = (hit, section, rowView) -> addMods.modrinthCard(hit, section, rowView, this);
+        int render = cardsShown.incrementAndGet();
+        ModrinthCards modrinthCards = (hit, section, rowView) -> addMods.modrinthCard(hit, section, rowView, this,
+            () -> render == cardsShown.get());
         CurseForgeCards curseForgeCards = (project, section, rowView) -> addMods.curseForgeCard(project, section,
             rowView, this);
 
@@ -508,8 +548,8 @@ public final class CollectionsDialog extends JDialog {
             return;
         }
 
-        notAddable.setText(left.isEmpty() ? "" : "<html><div style='width:640px'>"
-            + escape(GetText.tr("Can't be added here: {0}", String.join(", ", left))) + "</div></html>");
+        notAddable.setWrappedText(left.isEmpty() ? null
+            : escape(GetText.tr("Can't be added here: {0}", String.join(", ", left))));
         results.revalidate();
         results.repaint();
         SwingUtilities.invokeLater(() -> resultsScroll.getVerticalScrollBar().setValue(0));
@@ -637,6 +677,15 @@ public final class CollectionsDialog extends JDialog {
         description.setText("");
         showMessage(GetText.tr("Choose Favorites or a collection from your library, or open a Modrinth collection by "
             + "its link or from a creator."));
+    }
+
+    @Override
+    public void dispose() {
+        // lookups still loading aren't shown, and the cards' checks stop, once this has closed
+        generation++;
+        creatorGeneration++;
+        cardsShown.incrementAndGet();
+        super.dispose();
     }
 
     private static String escape(String text) {
