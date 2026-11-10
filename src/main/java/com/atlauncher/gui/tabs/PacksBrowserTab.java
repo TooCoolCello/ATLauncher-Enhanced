@@ -19,16 +19,20 @@ package com.atlauncher.gui.tabs;
 
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
+import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JLayer;
@@ -45,6 +49,7 @@ import org.mini2Dx.gettext.GetText;
 
 import com.atlauncher.App;
 import com.atlauncher.builders.HTMLBuilder;
+import com.atlauncher.constants.UIConstants;
 import com.atlauncher.data.minecraft.VersionManifestVersion;
 import com.atlauncher.evnt.listener.RelocalizationListener;
 import com.atlauncher.evnt.listener.TabChangeListener;
@@ -53,6 +58,8 @@ import com.atlauncher.evnt.manager.RelocalizationManager;
 import com.atlauncher.evnt.manager.TabChangeManager;
 import com.atlauncher.evnt.manager.ThemeManager;
 import com.atlauncher.gui.WheelScrollLayerUI;
+import com.atlauncher.gui.card.NilCard;
+import com.atlauncher.gui.card.packbrowser.IncompatiblePackFlag;
 import com.atlauncher.gui.panels.packbrowser.ATLauncherPacksPanel;
 import com.atlauncher.gui.panels.packbrowser.CurseForgePacksPanel;
 import com.atlauncher.gui.panels.packbrowser.FTBPacksPanel;
@@ -95,6 +102,16 @@ public final class PacksBrowserTab extends JPanel
 
     private final JPanel platformMessageJPanel = new JPanel(new BorderLayout());
     private final JLabel platformMessageJLabel = new JLabel();
+
+    // hides cards flagged by IncompatiblePackFlag; the count beside it keeps the filtering visible
+    private final JPanel northPanel = new JPanel(new BorderLayout());
+    private final JPanel compatibilityPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
+    private final JCheckBox hideIncompatibleCheckBox = new JCheckBox(GetText.tr("Hide incompatible packs"));
+    private final JLabel hiddenCountLabel = new JLabel();
+    private NilCard allHiddenCard = null;
+    // pages fetched without scrolling when hidden cards leave nothing to scroll; reset by each search or click
+    private static final int MAX_AUTO_LOADS = 5;
+    private int autoLoadsLeft = MAX_AUTO_LOADS;
 
     private final JTabbedPane platformTabbedPane = new JTabbedPane();
     private final PackBrowserPlatformPanel unifiedPacksPanel = new UnifiedPacksPanel();
@@ -247,6 +264,23 @@ public final class PacksBrowserTab extends JPanel
         platformMessageJLabel.setForeground(Color.YELLOW);
         platformMessageJPanel.add(platformMessageJLabel, BorderLayout.CENTER);
 
+        // compatibility filter, shown under the platform message on every platform
+        hideIncompatibleCheckBox.setSelected(App.settings.hideIncompatiblePacks);
+        // says exactly what is checked, so an unchecked platform isn't mistaken for a compatible one
+        hideIncompatibleCheckBox.setToolTipText(new HTMLBuilder().text(GetText.tr(
+            "Hides packs the launcher can prove won't install or run here:<br/>CurseForge packs that only use mod loaders ATLauncher can't install, FTB packs needing more memory than this computer has,<br/>and search results ATLauncher can't install. Other packs are never hidden."))
+            .build());
+        hideIncompatibleCheckBox.addActionListener(e -> {
+            App.settings.hideIncompatiblePacks = hideIncompatibleCheckBox.isSelected();
+            App.settings.save();
+            autoLoadsLeft = MAX_AUTO_LOADS;
+            applyCompatibilityFilter();
+        });
+        compatibilityPanel.add(hideIncompatibleCheckBox);
+        compatibilityPanel.add(hiddenCountLabel);
+        northPanel.add(platformMessageJPanel, BorderLayout.CENTER);
+        northPanel.add(compatibilityPanel, BorderLayout.SOUTH);
+
         // scrollpane
 
         scrollPane = new JScrollPane(contentPanel, JScrollPane.VERTICAL_SCROLLBAR_ALWAYS,
@@ -262,7 +296,7 @@ public final class PacksBrowserTab extends JPanel
                 int currentValue = scrollPane.getVerticalScrollBar().getValue();
 
                 if ((float) currentValue / (float) maxValue > 0.9f) {
-                    loadMorePacks();
+                    loadMorePacks(true);
                 }
             }
         });
@@ -341,7 +375,7 @@ public final class PacksBrowserTab extends JPanel
     private void afterTabChange() {
         // add the scrollPane to the newly selected panel
         PackBrowserPlatformPanel selectedPanel = (PackBrowserPlatformPanel) platformTabbedPane.getSelectedComponent();
-        selectedPanel.add(platformMessageJPanel, BorderLayout.NORTH);
+        selectedPanel.add(northPanel, BorderLayout.NORTH);
         selectedPanel.add(layerForScrollPane, BorderLayout.CENTER);
 
         // clear search
@@ -425,7 +459,72 @@ public final class PacksBrowserTab extends JPanel
         descendingSortButton.setVisible(sortDescending);
     }
 
-    private void loadMorePacks() {
+    /**
+     * Shows or hides flagged cards among everything loaded so far, then makes sure hiding never leaves the page empty
+     * or stuck: it says how many were hidden and fetches more pages while there's nothing to scroll.
+     */
+    private void applyCompatibilityFilter() {
+        PackBrowserPlatformPanel selectedPanel = (PackBrowserPlatformPanel) platformTabbedPane.getSelectedComponent();
+        boolean hide = hideIncompatibleCheckBox.isSelected();
+
+        if (allHiddenCard != null) {
+            contentPanel.remove(allHiddenCard);
+            allHiddenCard = null;
+        }
+
+        int hidden = 0;
+        int shown = 0;
+        for (Component component : contentPanel.getComponents()) {
+            if (IncompatiblePackFlag.reasonOf(component) != null) {
+                component.setVisible(!hide);
+                hidden += hide ? 1 : 0;
+            }
+            shown += component.isVisible() ? 1 : 0;
+        }
+
+        hiddenCountLabel.setText(hidden == 0 ? "" : GetText.tr("Hidden as incompatible: {0}", hidden));
+        boolean morePages = selectedPanel.hasPagination() && selectedPanel.hasMorePages();
+
+        if (hidden > 0 && shown == 0) {
+            List<NilCard.Action> actions = new ArrayList<>();
+            actions.add(new NilCard.Action(GetText.tr("Show Them"), e -> hideIncompatibleCheckBox.doClick()));
+            if (morePages) {
+                actions.add(new NilCard.Action(GetText.tr("Load More"), e -> {
+                    if (!loading) {
+                        autoLoadsLeft = MAX_AUTO_LOADS;
+                        loadMorePacks(true);
+                    }
+                }));
+            }
+            allHiddenCard = new NilCard(new HTMLBuilder()
+                .text(GetText.tr("All {0} packs loaded so far are hidden as incompatible.", hidden)).build(),
+                actions.toArray(new NilCard.Action[0]));
+
+            // the hidden cards take no space, so sharing their first row is fine
+            GridBagConstraints gbc = new GridBagConstraints();
+            gbc.gridx = 0;
+            gbc.gridy = 0;
+            gbc.weightx = 1.0;
+            gbc.insets = UIConstants.FIELD_INSETS;
+            gbc.fill = GridBagConstraints.BOTH;
+            contentPanel.add(allHiddenCard, gbc);
+        }
+
+        contentPanel.revalidate();
+        contentPanel.repaint();
+
+        // more pages only load on scrolling, which hidden cards can leave no room for
+        if (hidden > 0 && morePages && !loading && autoLoadsLeft > 0
+            && contentPanel.getPreferredSize().height <= scrollPane.getViewport().getExtentSize().height) {
+            autoLoadsLeft--;
+            loadMorePacks(false);
+        }
+    }
+
+    /**
+     * @param userAsked false for pages fetched to fill in for hidden cards, which aren't reported as searches
+     */
+    private void loadMorePacks(boolean userAsked) {
         PackBrowserPlatformPanel selectedPanel = (PackBrowserPlatformPanel) platformTabbedPane.getSelectedComponent();
 
         if (selectedPanel.hasPagination()) {
@@ -433,9 +532,11 @@ public final class PacksBrowserTab extends JPanel
             disableTabsWhileLoading();
             page += 1;
 
-            Analytics.trackEvent(
-                AnalyticsEvent.forSearchEventPlatform("add_pack", searchField.getText(), page,
-                    selectedPanel.getPlatformName()));
+            if (userAsked) {
+                Analytics.trackEvent(
+                    AnalyticsEvent.forSearchEventPlatform("add_pack", searchField.getText(), page,
+                        selectedPanel.getPlatformName()));
+            }
 
             // load in the content for the platform
             new Thread(() -> {
@@ -461,6 +562,7 @@ public final class PacksBrowserTab extends JPanel
                 SwingUtilities.invokeLater(() -> {
                     loading = false;
                     enableTabsAfterLoading();
+                    applyCompatibilityFilter();
                 });
 
                 revalidate();
@@ -490,6 +592,7 @@ public final class PacksBrowserTab extends JPanel
 
     private void load(boolean scrollToTop) {
         loaded = true;
+        autoLoadsLeft = MAX_AUTO_LOADS;
         PackBrowserPlatformPanel selectedPanel = (PackBrowserPlatformPanel) platformTabbedPane.getSelectedComponent();
 
         new Thread(() -> {
@@ -520,6 +623,7 @@ public final class PacksBrowserTab extends JPanel
 
                 loading = false;
                 enableTabsAfterLoading();
+                applyCompatibilityFilter();
             });
 
             revalidate();
@@ -548,6 +652,7 @@ public final class PacksBrowserTab extends JPanel
     public void onRelocalization() {
         categoriesLabel.setText(GetText.tr("Category:"));
         sortLabel.setText(GetText.tr("Sort:"));
+        hideIncompatibleCheckBox.setText(GetText.tr("Hide incompatible packs"));
 
         searchField.putClientProperty("JTextField.placeholderText", GetText.tr("Search"));
     }

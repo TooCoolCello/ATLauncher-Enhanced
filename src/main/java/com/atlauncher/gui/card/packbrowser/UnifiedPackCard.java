@@ -38,6 +38,8 @@ import org.mini2Dx.gettext.GetText;
 import com.atlauncher.App;
 import com.atlauncher.builders.HTMLBuilder;
 import com.atlauncher.constants.UIConstants;
+import com.atlauncher.data.Pack;
+import com.atlauncher.data.PackCompatibility;
 import com.atlauncher.evnt.listener.RelocalizationListener;
 import com.atlauncher.evnt.manager.RelocalizationManager;
 import com.atlauncher.exceptions.InvalidPack;
@@ -148,9 +150,12 @@ public class UnifiedPackCard extends JPanel implements RelocalizationListener {
 
         boolean showCreateServerButton = result.platform() == ModPackPlatformType.MODRINTH
                 || result.platform() == ModPackPlatformType.CURSEFORGE;
+        boolean atlauncherPackInstallable = false;
         if (result.platform() == ModPackPlatformType.ATLAUNCHER) {
             try {
-                showCreateServerButton = PackManager.getPackByID(Integer.parseInt(result.id())).createServer;
+                Pack atlauncherPack = PackManager.getPackByID(Integer.parseInt(result.id()));
+                showCreateServerButton = atlauncherPack.createServer;
+                atlauncherPackInstallable = atlauncherPack.canInstall();
             } catch (InvalidPack | NumberFormatException e) {
                 // ignored
             }
@@ -182,6 +187,8 @@ public class UnifiedPackCard extends JPanel implements RelocalizationListener {
         actionsPanel.setPreferredSize(new Dimension(0, 155));
 
         add(splitter, BorderLayout.CENTER);
+        IncompatiblePackFlag.apply(this,
+                PackCompatibility.unified(result.platform().rawValue(), atlauncherPackInstallable));
     }
 
     @Override

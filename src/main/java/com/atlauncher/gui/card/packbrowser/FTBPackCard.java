@@ -39,6 +39,7 @@ import org.mini2Dx.gettext.GetText;
 
 import com.atlauncher.App;
 import com.atlauncher.constants.UIConstants;
+import com.atlauncher.data.PackCompatibility;
 import com.atlauncher.data.ftb.FTBPackArt;
 import com.atlauncher.data.ftb.FTBPackArtType;
 import com.atlauncher.data.ftb.FTBPackManifest;
@@ -135,6 +136,7 @@ public class FTBPackCard extends JPanel implements RelocalizationListener {
         actionsPanel.setPreferredSize(new Dimension(0, 155));
 
         add(splitter, BorderLayout.CENTER);
+        IncompatiblePackFlag.apply(this, PackCompatibility.ftb(pack.versions, OS.getDetectedSystemRam()));
     }
 
     @Override
