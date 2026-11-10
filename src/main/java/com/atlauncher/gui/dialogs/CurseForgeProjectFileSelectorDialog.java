@@ -721,7 +721,9 @@ public class CurseForgeProjectFileSelectorDialog extends JDialog {
             // loaders would need its own migration action
             if (modsSection && installedFileId == null && updateCandidate == null) {
                 instanceOrServer.getMods().stream()
-                    .filter(m -> m.isFromCurseForge() && m.getCurseForgeModId() == mod.id).findFirst()
+                    // an unselected optional mod or skipped download was never put on disk, so it isn't installed
+                    .filter(m -> m.isFromCurseForge() && m.getCurseForgeModId() == mod.id
+                        && RequiredDependency.isPresent(m)).findFirst()
                     .ifPresent(installed -> {
                         updateCandidate = installed.curseForgeUpdateCandidate(instanceOrServer, projectFiles,
                             neoForgeForgeCompatabilityVersions);

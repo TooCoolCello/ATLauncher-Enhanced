@@ -926,7 +926,9 @@ public class ModrinthVersionSelectorDialog extends JDialog {
             // loaders would need its own migration action
             DisableableMod installedMod = this.installedVersionId != null ? null
                 : instanceOrServer.getMods().stream()
-                .filter(m -> m.isFromModrinth() && project.id.equalsIgnoreCase(m.modrinthProject.id))
+                // an unselected optional mod or skipped download was never put on disk, so it isn't installed
+                .filter(m -> m.isFromModrinth() && project.id.equalsIgnoreCase(m.modrinthProject.id)
+                    && RequiredDependency.isPresent(m))
                 .findFirst().orElse(null);
             if (installedMod != null && modVersions) {
                 this.versionsData = installedMod.modrinthUpdateCandidates(instanceOrServer, this.versionsData,

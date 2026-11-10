@@ -391,6 +391,32 @@ public class ModDialogsSmokeTest {
         assertEquals(1, requested("GET /v2/projects"));
     }
 
+    // an optional mod the user didn't pick when installing the pack is still listed, but was never downloaded
+    @Test
+    @SuppressWarnings("unchecked")
+    public void modrinthSelectorDoesNotCallANeverDownloadedEntryInstalled() throws Exception {
+        App.THEME = new ATLauncherLaf();
+        Server server = server(new LoaderVersion("47.1.3", false, "NeoForge"));
+        DisableableMod unpicked = modrinth("xmod", "x0", "2023-01-01T00:00:00Z", "neoforge");
+        unpicked.wasSelected = false;
+        server.mods.add(unpicked);
+        ModrinthProject project = new ModrinthProject();
+        project.id = "xmod";
+        project.slug = "xmod";
+        project.title = "X Mod";
+        project.loaders = Collections.singletonList("neoforge");
+        answers.put("/v2/project/xmod/version", "[" + modrinthVersionJson("x2", "2024-06-01T00:00:00Z") + "]");
+
+        AtomicReference<ModrinthVersionSelectorDialog> created = new AtomicReference<>();
+        SwingUtilities.invokeAndWait(() -> created.set(new ModrinthVersionSelectorDialog(null, project, server)));
+        opened.add(created.get());
+        awaitLoaded((JComboBox<ModrinthVersion>) field(ModrinthVersionSelectorDialog.class, "versionsDropdown")
+            .get(created.get()));
+
+        JLabel installed = (JLabel) field(ModrinthVersionSelectorDialog.class, "installedJLabel").get(created.get());
+        assertEquals("", installed.getText());
+    }
+
     @Test
     @SuppressWarnings("unchecked")
     public void curseForgeSelectorLooksUpDependenciesOnce() throws Exception {
