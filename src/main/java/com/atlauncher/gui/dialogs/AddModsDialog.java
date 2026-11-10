@@ -1209,6 +1209,9 @@ public final class AddModsDialog extends JDialog {
         // settled by the search result's latest-file index, with no request
         card.compatibility().setVerdict(ModCompatibility.forCurseForgeProject(
                 ModCompatibility.Target.of(instanceOrServer), sectionValue, castMod));
+        if (sectionValue.equals("Mods")) {
+            RelatedModsDialog.offer(card, () -> RelatedModsDialog.open(parent, this, instanceOrServer, castMod));
+        }
         return card;
     }
 
@@ -1345,6 +1348,9 @@ public final class AddModsDialog extends JDialog {
                         applyCompatibilityFilter();
                     }
                 })));
+        if (sectionValue.equals("Mods")) {
+            RelatedModsDialog.offer(card, () -> RelatedModsDialog.open(parent, this, instanceOrServer, castMod));
+        }
         return card;
     }
 

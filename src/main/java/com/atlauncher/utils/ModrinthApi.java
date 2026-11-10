@@ -381,6 +381,40 @@ public class ModrinthApi {
             String.format("%s/user/%s/collections", Constants.MODRINTH_API_V3_URL, user), getHeaders(), type);
     }
 
+    /**
+     * A user's projects, of every type. The username or ID must already be checked to be only letters, digits, _ and
+     * -. Null when the request fails.
+     */
+    public static @Nullable List<ModrinthProject> getUserProjects(String user) {
+        java.lang.reflect.Type type = new TypeToken<List<ModrinthProject>>() {
+        }.getType();
+
+        return NetworkClient.getCached(String.format("%s/user/%s/projects", Constants.MODRINTH_API_URL, user),
+            getHeaders(), type, new CacheControl.Builder().maxStale(10, TimeUnit.MINUTES).build());
+    }
+
+    /**
+     * The username of a project's owner, from its team members; null when the request fails or no member is listed.
+     */
+    public static @Nullable String getProjectOwner(String projectId) {
+        java.lang.reflect.Type type = new TypeToken<List<Map<String, Object>>>() {
+        }.getType();
+
+        List<Map<String, Object>> members = NetworkClient.getCached(
+            String.format("%s/project/%s/members", Constants.MODRINTH_API_URL, projectId), getHeaders(), type,
+            new CacheControl.Builder().maxStale(10, TimeUnit.MINUTES).build());
+        if (members == null) {
+            return null;
+        }
+
+        // the owner, else whoever is listed first
+        Map<String, Object> owner = members.stream().filter(m -> "Owner".equals(m.get("role"))).findFirst()
+            .orElse(members.isEmpty() ? null : members.get(0));
+        Object user = owner == null ? null : owner.get("user");
+        Object username = user instanceof Map ? ((Map<?, ?>) user).get("username") : null;
+        return username instanceof String ? (String) username : null;
+    }
+
     public static @Nullable List<ModrinthVersion> getVersions(String projectId) {
         return getVersions(projectId, null, null);
     }
