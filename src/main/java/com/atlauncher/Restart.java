@@ -40,6 +40,7 @@ public class Restart {
             }
             arguments.add(path);
             arguments.add("-Djna.nosys=true");
+            arguments.addAll(OS.LAUNCHER_JVM_ARGS);
             arguments.add("-jar");
         }
 

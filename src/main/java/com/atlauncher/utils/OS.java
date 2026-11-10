@@ -68,6 +68,15 @@ import oshi.software.os.OperatingSystem.ProcessSorting;
 public enum OS {
     LINUX, WINDOWS, OSX;
 
+    /**
+     * JVM options the launcher itself runs with. Keep in step with build.gradle (exe, start scripts) and the
+     * packaging scripts; the restart and update helpers add them when they start the launcher again. Measured idle:
+     * about 170 MB of private memory instead of 270 MB with the default collector and a starting heap of 1/64 of
+     * RAM. The heap still grows as needed and shrinks after a full collection. Both options work on Java 8.
+     */
+    public static final List<String> LAUNCHER_JVM_ARGS = Collections
+            .unmodifiableList(Arrays.asList("-XX:+UseSerialGC", "-Xms32m"));
+
     private static int memory = 0;
     // whether memory holds RAM a detection path actually read, rather than 0 or a placeholder
     private static boolean memoryDetected = false;

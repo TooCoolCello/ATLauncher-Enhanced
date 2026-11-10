@@ -174,6 +174,12 @@ except remembering SFTP passwords, which is now an opt-in (below). Known follow-
   plugin browser like the Add Mods browser (Modrinth lists plugins; Hangar and SpigotMC are other sources).
 - Disable Selected in Edit Mods doesn't warn about mods that need what's being disabled (removal does).
 - "Often used together in modpacks" for Related was skipped: the only data would be packs the user opened.
+- Performance pass (2026-11-10): the launcher runs with `-XX:+UseSerialGC -Xms32m` (`OS.LAUNCHER_JVM_ARGS`,
+  build.gradle exe/scripts, Linux packaging, restart/update helpers; not the macOS app bundle yet). Idle private
+  memory 270 MB to about 170 MB; startup about 1.5 s after the JVM starts and idle CPU near zero, so no code hot spots.
+  Add Mods loads its categories in the background. Left on the UI thread (base code, short): Tools tab deletes,
+  Edit Mods enable/disable/remove rebuilding every row, pack card images; `PacksBrowserTab` adds combo items from a
+  background thread.
 - Fix base ATLauncher deleting the old jar before a same-project update downloads (`Instance`/`Server`
   `addFileFromModrinth`/`addFileFromCurseForge`): after the user has tested this build.
 - Sync/Import pair jars by name, size and hash, not by the mod IDs inside jars (`mods.toml`, `fabric.mod.json`).

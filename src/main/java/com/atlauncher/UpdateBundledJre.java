@@ -25,6 +25,7 @@ import java.util.List;
 
 import com.atlauncher.utils.FileUtils;
 import com.atlauncher.utils.Java;
+import com.atlauncher.utils.OS;
 import com.atlauncher.utils.Utils;
 
 public class UpdateBundledJre {
@@ -50,6 +51,7 @@ public class UpdateBundledJre {
 
         arguments.add(Java.getPathToJavaExecutable(oldBundledJrePath.toPath()));
         arguments.add("-Djna.nosys=true");
+        arguments.addAll(OS.LAUNCHER_JVM_ARGS);
         arguments.add("-jar");
         arguments.add(launcherPath);
 

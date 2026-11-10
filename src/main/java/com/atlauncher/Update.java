@@ -56,6 +56,7 @@ public class Update {
             }
             arguments.add(path);
             arguments.add("-Djna.nosys=true");
+            arguments.addAll(OS.LAUNCHER_JVM_ARGS);
             arguments.add("-jar");
             arguments.add(launcherPath);
         }

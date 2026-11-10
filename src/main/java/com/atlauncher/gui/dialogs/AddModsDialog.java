@@ -1460,52 +1460,82 @@ public final class AddModsDialog extends JDialog {
 
     }
 
+    // which category fetch is current; one finishing after the platform or section changed again is dropped
+    private int categoriesRequest = 0;
+
+    /**
+     * Shows "All Categories" now and fills in the rest once fetched in the background, so a cold cache or slow
+     * network doesn't freeze the dialog.
+     */
     private void addCategories() {
+        boolean wasUpdating = updating;
         updating = true;
         categoriesComboBox.removeAllItems();
-
         categoriesComboBox.addItem(new ComboItem<>(null, GetText.tr("All Categories")));
+        updating = wasUpdating;
 
         boolean isCurseForge = ((ComboItem<ModPlatform>) hostComboBox.getSelectedItem())
                 .getValue() == ModPlatform.CURSEFORGE;
+        String section = ((ComboItem<String>) sectionComboBox.getSelectedItem()).getValue();
+        int request = ++categoriesRequest;
 
-        if (isCurseForge) {
-            List<CurseForgeCategoryForGame> categories = new ArrayList<>();
-
-            if (((ComboItem<String>) sectionComboBox.getSelectedItem()).getValue().equals("Data Packs")) {
-                categories.addAll(CurseForgeApi.getCategoriesForDataPacks());
-            } else if (((ComboItem<String>) sectionComboBox.getSelectedItem()).getValue().equals("Resource Packs")) {
-                categories.addAll(CurseForgeApi.getCategoriesForResourcePacks());
-            } else if (((ComboItem<String>) sectionComboBox.getSelectedItem()).getValue().equals("Shaders")) {
-                categories.addAll(CurseForgeApi.getCategoriesForShaderPacks());
-            } else if (((ComboItem<String>) sectionComboBox.getSelectedItem()).getValue().equals("Worlds")) {
-                categories.addAll(CurseForgeApi.getCategoriesForWorlds());
-            } else if (((ComboItem<String>) sectionComboBox.getSelectedItem()).getValue().equals("Plugins")) {
-                categories.addAll(CurseForgeApi.getCategoriesForPlugins());
-            } else {
-                categories.addAll(CurseForgeApi.getCategoriesForMods());
+        new Thread(() -> {
+            List<ComboItem<String>> items;
+            try {
+                items = isCurseForge ? curseForgeCategories(section) : modrinthCategories(section);
+            } catch (RuntimeException e) {
+                LogManager.logStackTrace("Couldn't load the categories for " + section, e);
+                return;
             }
+            SwingUtilities.invokeLater(() -> {
+                if (request != categoriesRequest) {
+                    return;
+                }
+                boolean was = updating;
+                updating = true;
+                items.forEach(categoriesComboBox::addItem);
+                updating = was;
+            });
+        }, "Add Mods categories").start();
+    }
 
-            categories.forEach(
-                    c -> categoriesComboBox.addItem(new ComboItem<>(String.valueOf(c.id), c.name)));
+    private static List<ComboItem<String>> curseForgeCategories(String section) {
+        List<CurseForgeCategoryForGame> categories = new ArrayList<>();
+        if (section.equals("Data Packs")) {
+            categories.addAll(CurseForgeApi.getCategoriesForDataPacks());
+        } else if (section.equals("Resource Packs")) {
+            categories.addAll(CurseForgeApi.getCategoriesForResourcePacks());
+        } else if (section.equals("Shaders")) {
+            categories.addAll(CurseForgeApi.getCategoriesForShaderPacks());
+        } else if (section.equals("Worlds")) {
+            categories.addAll(CurseForgeApi.getCategoriesForWorlds());
+        } else if (section.equals("Plugins")) {
+            categories.addAll(CurseForgeApi.getCategoriesForPlugins());
         } else {
-            List<ModrinthCategory> categories = new ArrayList<>();
-
-            if (((ComboItem<String>) sectionComboBox.getSelectedItem()).getValue().equals("Data Packs")) {
-                categories.addAll(ModrinthApi.getCategoriesForDataPacks());
-            } else if (((ComboItem<String>) sectionComboBox.getSelectedItem()).getValue().equals("Resource Packs")) {
-                categories.addAll(ModrinthApi.getCategoriesForResourcePacks());
-            } else if (((ComboItem<String>) sectionComboBox.getSelectedItem()).getValue().equals("Shaders")) {
-                categories.addAll(ModrinthApi.getCategoriesForShaders());
-            } else if (((ComboItem<String>) sectionComboBox.getSelectedItem()).getValue().equals("Plugins")) {
-                categories.addAll(ModrinthApi.getCategoriesForPlugins());
-            } else {
-                categories.addAll(ModrinthApi.getCategoriesForMods());
-            }
-
-            categories.forEach(
-                    c -> categoriesComboBox.addItem(new ComboItem<>(c.name, Utils.capitalize(c.name))));
+            categories.addAll(CurseForgeApi.getCategoriesForMods());
         }
-        updating = false;
+
+        List<ComboItem<String>> items = new ArrayList<>();
+        categories.forEach(c -> items.add(new ComboItem<>(String.valueOf(c.id), c.name)));
+        return items;
+    }
+
+    private static List<ComboItem<String>> modrinthCategories(String section) {
+        List<ModrinthCategory> categories = new ArrayList<>();
+        if (section.equals("Data Packs")) {
+            categories.addAll(ModrinthApi.getCategoriesForDataPacks());
+        } else if (section.equals("Resource Packs")) {
+            categories.addAll(ModrinthApi.getCategoriesForResourcePacks());
+        } else if (section.equals("Shaders")) {
+            categories.addAll(ModrinthApi.getCategoriesForShaders());
+        } else if (section.equals("Plugins")) {
+            categories.addAll(ModrinthApi.getCategoriesForPlugins());
+        } else {
+            categories.addAll(ModrinthApi.getCategoriesForMods());
+        }
+
+        List<ComboItem<String>> items = new ArrayList<>();
+        categories.forEach(c -> items.add(new ComboItem<>(c.name, Utils.capitalize(c.name))));
+        return items;
     }
 }
