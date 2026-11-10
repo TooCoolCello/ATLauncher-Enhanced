@@ -19,6 +19,9 @@ package com.atlauncher.workers;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import javax.swing.JLabel;
 
 import org.junit.jupiter.api.Test;
 
@@ -35,5 +38,16 @@ public class BackgroundImageWorkerTest {
     void normalUrlsKeepOnlyLettersAndDigits() {
         assertEquals("httpsmediaforgecdnnetavatars123456logopng",
                 BackgroundImageWorker.cacheKey("https://media.forgecdn.net/avatars/123/456/logo.png"));
+    }
+
+    @Test
+    void aWorkerCancelledBeforeItsImageLoadedFinishesQuietly() {
+        // a result taken off the page cancels its icon; done() still runs and must not throw
+        JLabel label = new JLabel();
+        BackgroundImageWorker worker = new BackgroundImageWorker(label, "https://example.com/icon.png", 32, 32);
+        assertTrue(worker.cancel(false));
+
+        worker.done();
+        assertNull(label.getIcon());
     }
 }

@@ -56,6 +56,8 @@ public final class CurseForgeProjectCard extends JPanel {
             Utils.getIconImage(App.THEME.getResourcePath("image", "tick")));
     private final ResultsView view;
     private final CompatibilityBadge compatibility;
+    // loads the icon; cancelled if this result is taken off the page first
+    private BackgroundImageWorker iconWorker;
 
     public CurseForgeProjectCard(final CurseForgeProject mod, final ModManagement instanceOrServer,
             ActionListener installAl,
@@ -107,9 +109,10 @@ public final class CurseForgeProjectCard extends JPanel {
 
         int iconSize = view.isRow() ? ResultRow.iconSize(view == ResultsView.COMPACT_LIST) : 60;
         Optional<CurseForgeAttachment> attachment = mod.getLogo();
-        attachment.ifPresent(
-                curseForgeAttachment -> new BackgroundImageWorker(icon, curseForgeAttachment.thumbnailUrl, iconSize,
-                        iconSize).execute());
+        if (attachment.isPresent()) {
+            iconWorker = new BackgroundImageWorker(icon, attachment.get().thumbnailUrl, iconSize, iconSize);
+            iconWorker.execute();
+        }
 
         updateInstalledStatus();
     }
@@ -160,7 +163,20 @@ public final class CurseForgeProjectCard extends JPanel {
         return view.isRow() ? ResultRow.preferredSize(super.getPreferredSize()) : super.getPreferredSize();
     }
 
-    private void updateInstalledStatus() {
+    @Override
+    public void removeNotify() {
+        super.removeNotify();
+        // a page change or redraw discards this result, so its icon is no longer wanted; one still queued never
+        // starts, so the next page's icons don't wait behind it
+        if (iconWorker != null) {
+            iconWorker.cancel(false);
+        }
+    }
+
+    /**
+     * Shows whether the project is installed now, such as after an install elsewhere also added it as a dependency.
+     */
+    public void updateInstalledStatus() {
         boolean alreadyInstalled = instanceOrServer == null ? false : instanceOrServer.getMods().stream()
                 .anyMatch(m -> m.isFromCurseForge() && m.curseForgeProjectId == mod.id);
 
