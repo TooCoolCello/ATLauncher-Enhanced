@@ -77,6 +77,7 @@ public final class RemoteServersDialog extends JDialog {
     private final JButton edit = new JButton(GetText.tr("Edit..."));
     private final JButton remove = new JButton(GetText.tr("Remove"));
     private final JButton test = new JButton(GetText.tr("Test Connection"));
+    private final JButton makeInstance = new JButton(GetText.tr("Make Instance..."));
     private final JLabel status = new JLabel(" ");
     // null if the file couldn't be read, so it's never overwritten
     private final List<RemoteServer> servers;
@@ -164,8 +165,8 @@ public final class RemoteServersDialog extends JDialog {
     private RemoteServersDialog(Window parent) {
         super(parent, GetText.tr("Remote Servers"), ModalityType.DOCUMENT_MODAL);
         setDefaultCloseOperation(DISPOSE_ON_CLOSE);
-        setMinimumSize(new Dimension(520, 320));
-        setSize(620, 400);
+        setMinimumSize(new Dimension(600, 320));
+        setSize(720, 400);
         setLocationRelativeTo(parent);
 
         servers = load(parent);
@@ -201,6 +202,9 @@ public final class RemoteServersDialog extends JDialog {
         edit.addActionListener(e -> edit());
         remove.addActionListener(e -> remove());
         test.addActionListener(e -> testConnection(this, list.getSelectedValue(), status, test));
+        makeInstance.setToolTipText(GetText.tr("Make a new instance from this server's Minecraft version, loader, "
+            + "mods and configs"));
+        makeInstance.addActionListener(e -> ServerImportDialog.open(this, list.getSelectedValue()));
         JButton close = new JButton(GetText.tr("Close"));
         close.addActionListener(e -> dispose());
 
@@ -209,6 +213,7 @@ public final class RemoteServersDialog extends JDialog {
         actions.add(edit);
         actions.add(remove);
         actions.add(test);
+        actions.add(makeInstance);
         JPanel buttons = new JPanel(new BorderLayout());
         buttons.add(actions, BorderLayout.CENTER);
         buttons.add(close, BorderLayout.EAST);
@@ -234,6 +239,7 @@ public final class RemoteServersDialog extends JDialog {
         edit.setEnabled(servers != null && selected);
         remove.setEnabled(servers != null && selected);
         test.setEnabled(selected);
+        makeInstance.setEnabled(selected);
     }
 
     private void add() {
