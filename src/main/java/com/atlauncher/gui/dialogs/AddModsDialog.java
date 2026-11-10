@@ -263,8 +263,11 @@ public final class AddModsDialog extends JDialog {
         searchButtonsPanel.add(this.collectionsButton);
         this.collectionsButton.setToolTipText(GetText.tr("Your collections of CurseForge and Modrinth projects, and "
                 + "Modrinth collections you've opened or saved"));
-        this.collectionsButton.addActionListener(
-                e -> new CollectionsDialog(this, instanceOrServer).setVisible(true));
+        this.collectionsButton.addActionListener(e -> {
+            new CollectionsDialog(this, instanceOrServer).setVisible(true);
+            // what was added there shows as installed here
+            refreshInstalled();
+        });
         // only where Add Mods has a Mods section
         LoaderVersion packModsLoader = instanceOrServer.getLoaderVersion();
         if (packModsLoader != null && !packModsLoader.isPaper() && !packModsLoader.isPurpur()) {
@@ -1271,7 +1274,11 @@ public final class AddModsDialog extends JDialog {
         card.compatibility().setVerdict(ModCompatibility.forCurseForgeProject(
                 ModCompatibility.Target.of(instanceOrServer), sectionValue, castMod));
         if (sectionValue.equals("Mods")) {
-            RelatedModsDialog.offer(card, () -> RelatedModsDialog.open(parent, this, instanceOrServer, castMod));
+            RelatedModsDialog.offer(card, () -> {
+                RelatedModsDialog.open(parent, this, instanceOrServer, castMod);
+                // whatever was added there, by any of its routes, shows as installed here
+                refreshInstalled();
+            });
         }
         return card;
     }
@@ -1421,7 +1428,11 @@ public final class AddModsDialog extends JDialog {
                     }
                 })));
         if (sectionValue.equals("Mods")) {
-            RelatedModsDialog.offer(card, () -> RelatedModsDialog.open(parent, this, instanceOrServer, castMod));
+            RelatedModsDialog.offer(card, () -> {
+                RelatedModsDialog.open(parent, this, instanceOrServer, castMod);
+                // whatever was added there, by any of its routes, shows as installed here
+                refreshInstalled();
+            });
         }
         return card;
     }
