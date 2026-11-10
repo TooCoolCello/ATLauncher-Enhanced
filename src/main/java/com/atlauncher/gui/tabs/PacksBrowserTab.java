@@ -109,9 +109,12 @@ public final class PacksBrowserTab extends JPanel
     private final JCheckBox hideIncompatibleCheckBox = new JCheckBox(GetText.tr("Hide incompatible packs"));
     private final JLabel hiddenCountLabel = new JLabel();
     private NilCard allHiddenCard = null;
-    // pages fetched without scrolling when hidden cards leave nothing to scroll; reset by each search or click
+    // pages fetched without scrolling when hidden cards leave nothing to scroll; reset by each search, click or scroll
     private static final int MAX_AUTO_LOADS = 5;
     private int autoLoadsLeft = MAX_AUTO_LOADS;
+    // each tab change fetches its platform's categories; only the latest fetch fills the box
+    private int categoriesGeneration = 0;
+    private boolean fillingCategories = false;
 
     private final JTabbedPane platformTabbedPane = new JTabbedPane();
     private final PackBrowserPlatformPanel unifiedPacksPanel = new UnifiedPacksPanel();
@@ -169,7 +172,8 @@ public final class PacksBrowserTab extends JPanel
         actionsPanel.add(categoriesPanel);
 
         categoriesComboBox.addActionListener(e -> {
-            if (!loading) {
+            // the first item added selects "All Categories", which is what's already loaded
+            if (!loading && !fillingCategories) {
                 loading = true;
                 page = 1;
 
@@ -296,6 +300,8 @@ public final class PacksBrowserTab extends JPanel
                 int currentValue = scrollPane.getVerticalScrollBar().getValue();
 
                 if ((float) currentValue / (float) maxValue > 0.9f) {
+                    // a scroll asks for more as a click does
+                    autoLoadsLeft = MAX_AUTO_LOADS;
                     loadMorePacks(true);
                 }
             }
@@ -412,12 +418,22 @@ public final class PacksBrowserTab extends JPanel
         }
 
         // add in categories combo box items if the platform supports it
+        int categories = ++categoriesGeneration;
         if (selectedPanel.hasCategories()) {
             new Thread(() -> {
-                categoriesComboBox.addItem(new ComboItem<>(null, GetText.tr("All Categories")));
-                for (Map.Entry<String, String> entry : selectedPanel.getCategoryFields().entrySet()) {
-                    categoriesComboBox.addItem(new ComboItem<>(entry.getKey(), entry.getValue()));
-                }
+                Map<String, String> fields = selectedPanel.getCategoryFields();
+                // filled on the event dispatch thread, and only while this platform is still the one shown
+                SwingUtilities.invokeLater(() -> {
+                    if (categories != categoriesGeneration) {
+                        return;
+                    }
+                    fillingCategories = true;
+                    categoriesComboBox.addItem(new ComboItem<>(null, GetText.tr("All Categories")));
+                    for (Map.Entry<String, String> entry : fields.entrySet()) {
+                        categoriesComboBox.addItem(new ComboItem<>(entry.getKey(), entry.getValue()));
+                    }
+                    fillingCategories = false;
+                });
             }).start();
         }
 
@@ -513,9 +529,12 @@ public final class PacksBrowserTab extends JPanel
         contentPanel.revalidate();
         contentPanel.repaint();
 
-        // more pages only load on scrolling, which hidden cards can leave no room for
+        // more pages only load on scrolling, which hidden cards can leave no room for: nothing to scroll, or a page
+        // scrolled to at the bottom that was all hidden, which leaves nothing below to scroll to
+        int visibleBottom = scrollPane.getViewport().getViewPosition().y
+            + scrollPane.getViewport().getExtentSize().height;
         if (hidden > 0 && morePages && !loading && autoLoadsLeft > 0
-            && contentPanel.getPreferredSize().height <= scrollPane.getViewport().getExtentSize().height) {
+            && contentPanel.getPreferredSize().height <= visibleBottom) {
             autoLoadsLeft--;
             loadMorePacks(false);
         }
@@ -538,26 +557,32 @@ public final class PacksBrowserTab extends JPanel
                         selectedPanel.getPlatformName()));
             }
 
+            // read here, as load() reads them: a box can still be empty, such as categories still being fetched
+            String minecraftVersion = null;
+            if (selectedPanel.supportsMinecraftVersionFiltering()
+                && minecraftVersionComboBox.getSelectedItem() != null) {
+                minecraftVersion = ((ComboItem<String>) minecraftVersionComboBox.getSelectedItem()).getValue();
+            }
+
+            String category = null;
+            if (selectedPanel.hasCategories() && categoriesComboBox.getSelectedItem() != null) {
+                category = ((ComboItem<String>) categoriesComboBox.getSelectedItem()).getValue();
+            }
+
+            String sort = null;
+            if (selectedPanel.hasSort() && sortComboBox.getSelectedItem() != null) {
+                sort = ((ComboItem<String>) sortComboBox.getSelectedItem()).getValue();
+            }
+
+            String minecraftVersionToLoad = minecraftVersion;
+            String categoryToLoad = category;
+            String sortToLoad = sort;
+
             // load in the content for the platform
             new Thread(() -> {
-                String minecraftVersion = null;
-                if (selectedPanel.hasCategories()) {
-                    minecraftVersion = ((ComboItem<String>) minecraftVersionComboBox.getSelectedItem()).getValue();
-                }
-
-                String category = null;
-                if (selectedPanel.hasCategories()) {
-                    category = ((ComboItem<String>) categoriesComboBox.getSelectedItem()).getValue();
-                }
-
-                String sort = null;
-                if (selectedPanel.hasSort()) {
-                    sort = ((ComboItem<String>) sortComboBox.getSelectedItem()).getValue();
-                }
-
                 // load in the content for the platform
-                selectedPanel.loadMorePacks(contentPanel, minecraftVersion, category, sort, sortDescending,
-                    searchField.getText(), page);
+                selectedPanel.loadMorePacks(contentPanel, minecraftVersionToLoad, categoryToLoad, sortToLoad,
+                    sortDescending, searchField.getText(), page);
 
                 SwingUtilities.invokeLater(() -> {
                     loading = false;
