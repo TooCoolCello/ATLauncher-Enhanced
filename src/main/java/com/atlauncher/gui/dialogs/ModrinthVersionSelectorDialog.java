@@ -469,8 +469,13 @@ public class ModrinthVersionSelectorDialog extends JDialog {
         instanceOrServer.addFileFromModrinth(dependency, picked, null, null,
             ModrinthDownloadMetadata.Reason.DEPENDENCY, parent.id, progressDialog);
 
+        return isInstalled(dependency, picked);
+    }
+
+    private boolean isInstalled(ModrinthProject installedProject, ModrinthVersion installedVersion) {
         return instanceOrServer.getMods().stream().anyMatch(m -> m != null && m.isFromModrinth()
-            && dependency.id.equals(m.modrinthProject.id) && picked.id.equalsIgnoreCase(m.modrinthVersion.id));
+            && installedProject.id.equals(m.modrinthProject.id)
+            && installedVersion.id.equalsIgnoreCase(m.modrinthVersion.id));
     }
 
     // whether an installed mod is the project (or exact version) a dependency names
@@ -802,8 +807,11 @@ public class ModrinthVersionSelectorDialog extends JDialog {
                 Analytics.trackEvent(project.getAnalyticsEventForAdded(version, effectiveInstallType));
                 instanceOrServer.addFileFromModrinth(project, version, file, effectiveInstallType, downloadReason,
                     dependentVersionId, progressDialog);
-                problems.addAll(dependenciesPanel.apply(instanceOrServer, progressDialog,
-                    (item, picked) -> installDependency(item, picked, version, progressDialog)));
+                // a failed add has already said so; its dependencies are left as they are
+                if (isInstalled(project, version)) {
+                    problems.addAll(dependenciesPanel.apply(instanceOrServer, progressDialog,
+                        (item, picked) -> installDependency(item, picked, version, progressDialog)));
+                }
                 progressDialog.close();
             }));
             progressDialog.start();

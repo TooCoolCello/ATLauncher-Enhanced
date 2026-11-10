@@ -279,8 +279,11 @@ public class CurseForgeProjectFileSelectorDialog extends JDialog {
             progressDialog.addThread(new Thread(() -> {
                 Analytics.trackEvent(mod.getAnalyticsEventForAdded(file));
                 instanceOrServer.addFileFromCurseForge(mod, file, progressDialog);
-                problems.addAll(dependenciesPanel.apply(instanceOrServer, progressDialog,
-                    (item, picked) -> installDependency(item, picked, progressDialog)));
+                // a failed add has already said so; its dependencies are left as they are
+                if (isInstalled(mod, file)) {
+                    problems.addAll(dependenciesPanel.apply(instanceOrServer, progressDialog,
+                        (item, picked) -> installDependency(item, picked, progressDialog)));
+                }
 
                 progressDialog.close();
             }));
@@ -627,8 +630,12 @@ public class CurseForgeProjectFileSelectorDialog extends JDialog {
         CurseForgeProject dependency = (CurseForgeProject) item.project;
         instanceOrServer.addFileFromCurseForge(dependency, picked, progressDialog);
 
+        return isInstalled(dependency, picked);
+    }
+
+    private boolean isInstalled(CurseForgeProject project, CurseForgeFile file) {
         return instanceOrServer.getMods().stream().anyMatch(m -> m != null && m.isFromCurseForge()
-            && m.getCurseForgeModId() == dependency.id && m.getCurseForgeFileId() == picked.id);
+            && m.getCurseForgeModId() == project.id && m.getCurseForgeFileId() == file.id);
     }
 
     private boolean isKnownEquivalent(CurseForgeFileDependency dependency, DisableableMod m) {

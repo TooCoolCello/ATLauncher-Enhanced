@@ -19,7 +19,6 @@ package com.atlauncher.gui.components;
 
 import java.awt.BorderLayout;
 import java.awt.Color;
-import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Rectangle;
@@ -52,6 +51,7 @@ import com.atlauncher.gui.dialogs.ProgressDialog;
 import com.atlauncher.managers.DialogManager;
 import com.atlauncher.managers.LogManager;
 import com.atlauncher.utils.ComboItem;
+import com.formdev.flatlaf.util.UIScale;
 
 /**
  * The dependencies of the file being added, one row each with a choice of what to do (see {@link DependencyChoice}).
@@ -118,6 +118,8 @@ public final class DependencyChoicesPanel<F> extends JPanel implements Scrollabl
             this.newerThanInstalled = newerThanInstalled;
         }
     }
+
+    private static final int CONTROLS_WIDTH = 190;
 
     private final List<Row<F>> rows = new ArrayList<>();
 
@@ -274,13 +276,16 @@ public final class DependencyChoicesPanel<F> extends JPanel implements Scrollabl
                 refresh();
             });
 
-            JPanel controls = new JPanel();
-            controls.setLayout(new BoxLayout(controls, BoxLayout.Y_AXIS));
-            choice.setAlignmentX(Component.RIGHT_ALIGNMENT);
-            controls.add(choice);
+            // the same width on every row, so the choices line up
+            JPanel controls = new JPanel(new BorderLayout(0, 2)) {
+                @Override
+                public Dimension getPreferredSize() {
+                    return new Dimension(UIScale.scale(CONTROLS_WIDTH), super.getPreferredSize().height);
+                }
+            };
+            controls.add(choice, BorderLayout.NORTH);
 
-            JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 2));
-            buttons.setAlignmentX(Component.RIGHT_ALIGNMENT);
+            JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
             if (item.choose != null) {
                 JButton chooseButton = new JButton(GetText.tr("Choose File"));
                 chooseButton.setToolTipText(GetText.tr("Pick the file yourself and install it now"));
@@ -292,7 +297,7 @@ public final class DependencyChoicesPanel<F> extends JPanel implements Scrollabl
                 viewButton.addActionListener(e -> item.view.run());
                 buttons.add(viewButton);
             }
-            controls.add(buttons);
+            controls.add(buttons, BorderLayout.CENTER);
 
             add(text, BorderLayout.CENTER);
             add(controls, BorderLayout.EAST);
@@ -360,8 +365,10 @@ public final class DependencyChoicesPanel<F> extends JPanel implements Scrollabl
             StringBuilder html = new StringBuilder("<b>").append(escape(item.title)).append("</b> &middot; ")
                 .append(escape(item.kind.label()));
 
+            // what an unmet required dependency or a kept incompatible mod says is shown as a warning
+            String warning = DependencyChoice.warning(item.kind, item.state, action(), null);
             if (item.status != null) {
-                html.append("<br/>").append(escape(item.status));
+                html.append("<br/>").append(warning == null ? escape(item.status) : warn(item.status));
             }
 
             if (action().installs()) {
@@ -381,8 +388,8 @@ public final class DependencyChoicesPanel<F> extends JPanel implements Scrollabl
                 }
             }
 
-            String warning = warning();
-            if (warning != null && !warning.equals(item.status)) {
+            // a kept one's status already says why it may not satisfy this mod
+            if (warning != null && (action() != Action.KEEP || item.kind == DependencyChoice.Kind.INCOMPATIBLE)) {
                 html.append("<br/>").append(warn(warning));
             }
 
