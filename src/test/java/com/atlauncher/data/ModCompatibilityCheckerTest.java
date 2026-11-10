@@ -1,0 +1,35 @@
+/*
+ * ATLauncher - https://github.com/ATLauncher/ATLauncher
+ * Copyright (C) 2026 ATLauncher
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ */
+package com.atlauncher.data;
+
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import org.junit.jupiter.api.Test;
+
+public class ModCompatibilityCheckerTest {
+    @Test
+    void requestsAreSpacedOut() throws InterruptedException {
+        // the first may go at once; the next two each wait their 250 ms slot
+        ModCompatibilityChecker.waitForTurn();
+        long start = System.nanoTime();
+        ModCompatibilityChecker.waitForTurn();
+        ModCompatibilityChecker.waitForTurn();
+        long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+        assertTrue(elapsedMs >= 450, "two more requests took only " + elapsedMs + " ms");
+    }
+}

@@ -37,9 +37,13 @@ import com.atlauncher.utils.ModrinthApi;
  * dialog closes and judged again on each use, so installing Connector meanwhile is taken into account.
  */
 public final class ModCompatibilityChecker {
-    // ponytail: 4 at a time like Edit Mods' update checks; Modrinth allows about 300 requests a minute, so a 200-result
-    // page fits. Batch by each result's latest_version (GET /versions?ids=) first if that ever trips the limit.
+    // 4 at a time like Edit Mods' update checks
     private static final int THREADS = 4;
+    // ponytail: one request per 250 ms across every open checker (240 a minute), under Modrinth's ~300 a minute with
+    // room for searches, so paging quickly doesn't turn results into "couldn't check". A 200-result page takes under a
+    // minute; read X-Ratelimit-Remaining instead if that's too slow.
+    private static final long REQUEST_SPACING_MS = 250;
+    private static long nextRequestAt = 0;
 
     // fetched files per project and section; failures aren't kept, so they're tried again next time
     private final Map<String, List<ModCompatibility.FileFacts>> fetched = new ConcurrentHashMap<>();
@@ -71,7 +75,10 @@ public final class ModCompatibilityChecker {
                     return;
                 }
 
-                later.accept(ModCompatibility.forModrinthFacts(target, section, fetch(target, section, hit, key)));
+                List<ModCompatibility.FileFacts> found = fetch(target, section, hit, key, wanted);
+                if (found != null || wanted.getAsBoolean()) {
+                    later.accept(ModCompatibility.forModrinthFacts(target, section, found));
+                }
             });
         } catch (RejectedExecutionException e) {
             // the dialog closed
@@ -82,10 +89,22 @@ public final class ModCompatibilityChecker {
     }
 
     private List<ModCompatibility.FileFacts> fetch(ModCompatibility.Target target, String section,
-            ModrinthSearchHit hit, String key) {
+            ModrinthSearchHit hit, String key, BooleanSupplier wanted) {
         List<ModCompatibility.FileFacts> facts = fetched.get(key);
         if (facts != null) {
             return facts;
+        }
+
+        try {
+            waitForTurn();
+        } catch (InterruptedException e) {
+            // the dialog closed
+            Thread.currentThread().interrupt();
+            return null;
+        }
+        // the page may have changed while waiting
+        if (!wanted.getAsBoolean()) {
+            return null;
         }
 
         try {
@@ -101,6 +120,20 @@ public final class ModCompatibilityChecker {
         } catch (RuntimeException e) {
             LogManager.logStackTrace("Error checking " + hit.projectId + " for compatible versions", e, false);
             return null;
+        }
+    }
+
+    // takes the next request slot and sleeps until it comes round
+    static void waitForTurn() throws InterruptedException {
+        long wait;
+        synchronized (ModCompatibilityChecker.class) {
+            long now = System.currentTimeMillis();
+            long slot = Math.max(now, nextRequestAt);
+            nextRequestAt = slot + REQUEST_SPACING_MS;
+            wait = slot - now;
+        }
+        if (wait > 0) {
+            Thread.sleep(wait);
         }
     }
 
