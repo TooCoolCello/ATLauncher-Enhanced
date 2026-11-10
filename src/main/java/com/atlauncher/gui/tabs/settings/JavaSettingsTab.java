@@ -23,6 +23,7 @@ import java.awt.FlowLayout;
 import java.awt.GridBagConstraints;
 import java.awt.event.ItemEvent;
 import java.io.File;
+import java.util.function.Consumer;
 
 import javax.swing.Box;
 import javax.swing.BoxLayout;
@@ -30,6 +31,7 @@ import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
+import javax.swing.JComponent;
 import javax.swing.JFileChooser;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
@@ -52,6 +54,7 @@ import com.atlauncher.App;
 import com.atlauncher.builders.HTMLBuilder;
 import com.atlauncher.constants.UIConstants;
 import com.atlauncher.data.CheckState;
+import com.atlauncher.data.DefaultGameOptions;
 import com.atlauncher.data.ScreenResolution;
 import com.atlauncher.gui.components.HeapFlagsPreview;
 import com.atlauncher.gui.components.JLabelWithHover;
@@ -682,6 +685,106 @@ public class JavaSettingsTab extends AbstractSettingsTab {
             itemEvent -> viewModel.setSystemOpenAL(itemEvent.getStateChange() == ItemEvent.SELECTED));
         addDisposable(viewModel.getSystemOpenAL().subscribe(useSystemOpenAl::setSelected));
         add(useSystemOpenAl, gbc);
+
+        addDefaultGameOptions();
+    }
+
+    // edits App.settings directly, like the rest of this tab; the Save button writes it
+    private void addDefaultGameOptions() {
+        DefaultGameOptions options = App.settings.defaultGameOptions;
+
+        gbc.gridx = 0;
+        gbc.gridy++;
+        gbc.insets = UIConstants.LABEL_INSETS;
+        gbc.anchor = GridBagConstraints.BASELINE_TRAILING;
+        add(new JLabelWithHover(GetText.tr("Default Game Options") + ":", HELP_ICON,
+            new HTMLBuilder().center().split(100).text(GetText.tr(
+                "Game options every new instance starts with, written into its options.txt. Unticked options keep "
+                    + "the pack's or the game's own value, and options a Minecraft version doesn't have are skipped. "
+                    + "Edit Instance > Apply Default Game Options sets them on an existing instance."))
+                .build()),
+            gbc);
+
+        gbc.gridx++;
+        gbc.insets = UIConstants.FIELD_INSETS;
+        gbc.anchor = GridBagConstraints.BASELINE_LEADING;
+        add(new JLabel(GetText.tr("Tick the options new instances should start with.")), gbc);
+
+        JSpinner fov = new JSpinner(new SpinnerNumberModel(options.fov == null ? 70 : options.fov,
+            DefaultGameOptions.MIN_FOV, DefaultGameOptions.MAX_FOV, 1));
+        addGameOption(GetText.tr("Field Of View"), GetText.tr("The game's default is 70."), fov,
+            options.fov != null, set -> options.fov = set ? (Integer) fov.getValue() : null);
+
+        JSpinner sensitivity = new JSpinner(new SpinnerNumberModel(
+            options.mouseSensitivity == null ? 100 : options.mouseSensitivity, 0,
+            DefaultGameOptions.MAX_MOUSE_SENSITIVITY, 1));
+        addGameOption(GetText.tr("Mouse Sensitivity (%)"), GetText.tr("The game's default is 100%."), sensitivity,
+            options.mouseSensitivity != null,
+            set -> options.mouseSensitivity = set ? (Integer) sensitivity.getValue() : null);
+
+        JSpinner renderDistance = new JSpinner(new SpinnerNumberModel(
+            options.renderDistance == null ? 12 : options.renderDistance, DefaultGameOptions.MIN_RENDER_DISTANCE,
+            DefaultGameOptions.MAX_RENDER_DISTANCE, 1));
+        addGameOption(GetText.tr("Render Distance (Chunks)"),
+            GetText.tr("Minecraft before 1.8 stops at 16 chunks, and it may lower values your computer can't run."),
+            renderDistance, options.renderDistance != null,
+            set -> options.renderDistance = set ? (Integer) renderDistance.getValue() : null);
+
+        // the index is the scale, Auto being 0
+        JComboBox<String> guiScale = new JComboBox<>();
+        guiScale.addItem(GetText.tr("Auto"));
+        for (int scale = 1; scale <= DefaultGameOptions.MAX_GUI_SCALE; scale++) {
+            guiScale.addItem(String.valueOf(scale));
+        }
+        guiScale.setSelectedIndex(options.guiScale == null ? 0 : options.guiScale);
+        addGameOption(GetText.tr("GUI Scale"),
+            GetText.tr("The game uses the largest scale that fits the window when this is too big."), guiScale,
+            options.guiScale != null, set -> options.guiScale = set ? guiScale.getSelectedIndex() : null);
+
+        JComboBox<String> autoJump = new JComboBox<>(new String[] { GetText.tr("On"), GetText.tr("Off") });
+        autoJump.setSelectedIndex(options.autoJump == null || options.autoJump ? 0 : 1);
+        addGameOption(GetText.tr("Auto-Jump"), GetText.tr("Minecraft 1.11 and newer."), autoJump,
+            options.autoJump != null, set -> options.autoJump = set ? autoJump.getSelectedIndex() == 0 : null);
+
+        JSpinner masterVolume = new JSpinner(new SpinnerNumberModel(
+            options.masterVolume == null ? 100 : options.masterVolume, 0, DefaultGameOptions.MAX_MASTER_VOLUME, 1));
+        addGameOption(GetText.tr("Master Volume (%)"), GetText.tr("Minecraft 1.7 and newer."), masterVolume,
+            options.masterVolume != null,
+            set -> options.masterVolume = set ? (Integer) masterVolume.getValue() : null);
+    }
+
+    // one default game option: ticked, new instances get the value beside it; unticked, it's left alone
+    private void addGameOption(String label, String help, JComponent editor, boolean set, Consumer<Boolean> save) {
+        gbc.gridx = 0;
+        gbc.gridy++;
+        gbc.insets = UIConstants.LABEL_INSETS;
+        gbc.anchor = GridBagConstraints.BASELINE_TRAILING;
+        add(new JLabelWithHover(label + ":", HELP_ICON, help), gbc);
+
+        JCheckBox change = new JCheckBox();
+        change.setSelected(set);
+        change.setToolTipText(GetText.tr("Set this in new instances"));
+        editor.setEnabled(set);
+
+        Runnable changed = () -> {
+            editor.setEnabled(change.isSelected());
+            save.accept(change.isSelected());
+        };
+        change.addItemListener(e -> changed.run());
+        if (editor instanceof JSpinner) {
+            ((JSpinner) editor).addChangeListener(e -> changed.run());
+        } else {
+            ((JComboBox<?>) editor).addActionListener(e -> changed.run());
+        }
+
+        JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEADING, 0, 0));
+        panel.add(change);
+        panel.add(editor);
+
+        gbc.gridx++;
+        gbc.insets = UIConstants.CHECKBOX_FIELD_INSETS;
+        gbc.anchor = GridBagConstraints.BASELINE_LEADING;
+        add(panel, gbc);
     }
 
     private void showJavaPathWarning() {

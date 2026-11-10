@@ -134,6 +134,8 @@ public class Settings {
     public boolean disableLegacyLaunching = false;
     public boolean useSystemGlfw = false;
     public boolean useSystemOpenAl = false;
+    // written into options.txt of each new client instance; every option starts as "don't change"
+    public DefaultGameOptions defaultGameOptions = new DefaultGameOptions();
 
     // Environment Variables
     public Map<String, String> environmentVariables = new HashMap<>();
@@ -327,6 +329,7 @@ public class Settings {
         validateMemory();
         validateInitialMemory();
         validateWindowSize();
+        validateDefaultGameOptions();
 
         validateProxy();
 
@@ -568,6 +571,14 @@ public class Settings {
                 + maximumMemory + "MB, so using " + (valid == 0 ? "Java's default" : valid + "MB") + " instead");
             initialMemory = valid;
         }
+    }
+
+    // null when a settings file was saved without it (e.g. by upstream ATLauncher)
+    void validateDefaultGameOptions() {
+        if (defaultGameOptions == null) {
+            defaultGameOptions = new DefaultGameOptions();
+        }
+        defaultGameOptions.validate();
     }
 
     private void validateWindowSize() {

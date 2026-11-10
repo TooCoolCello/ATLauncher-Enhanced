@@ -23,8 +23,10 @@ import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Map;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
@@ -58,10 +60,12 @@ import com.atlauncher.managers.AccountManager;
 import com.atlauncher.managers.ConfigManager;
 import com.atlauncher.managers.DialogManager;
 import com.atlauncher.managers.InstanceManager;
+import com.atlauncher.managers.LogManager;
 import com.atlauncher.network.Analytics;
 import com.atlauncher.network.analytics.AnalyticsEvent;
 import com.atlauncher.utils.DefaultConfigsFromWorld;
 import com.atlauncher.utils.OS;
+import com.atlauncher.utils.OptionsTxt;
 
 /**
  * <p/>
@@ -124,6 +128,7 @@ public class InstanceCard extends CollapsiblePanel {
     private final JMenuItem changeImageMenuItem = new JMenuItem(GetText.tr("Change Image"));
     private final JMenuItem manageWorldConfigDefaultsMenuItem = new JMenuItem(
             GetText.tr("Manage World Config Defaults..."));
+    private final JMenuItem applyDefaultGameOptionsMenuItem = new JMenuItem(GetText.tr("Apply Default Game Options"));
     // #. {0} is the loader (Forge/Fabric/Quilt)
     private final JMenuItem addFabricMenuItem = new JMenuItem(GetText.tr("Add {0}", "Fabric"));
     // #. {0} is the loader (Forge/Fabric/Quilt)
@@ -337,6 +342,7 @@ public class InstanceCard extends CollapsiblePanel {
         editInstancePopupMenu.add(changeDescriptionMenuItem);
         editInstancePopupMenu.add(changeImageMenuItem);
         editInstancePopupMenu.add(manageWorldConfigDefaultsMenuItem);
+        editInstancePopupMenu.add(applyDefaultGameOptionsMenuItem);
         editInstancePopupMenu.addSeparator();
 
         if (ConfigManager.getConfigItem("loaders.fabric.enabled", true)
@@ -398,6 +404,9 @@ public class InstanceCard extends CollapsiblePanel {
                 + "in this instance start with, and copy more from its worlds."));
         manageWorldConfigDefaultsMenuItem.addActionListener(
                 e -> ManageWorldConfigDefaultsDialog.open(SwingUtilities.getWindowAncestor(this), instance));
+        applyDefaultGameOptionsMenuItem.setToolTipText(GetText.tr("Set the default game options from Settings in "
+                + "this instance's options.txt."));
+        applyDefaultGameOptionsMenuItem.addActionListener(e -> applyDefaultGameOptions());
 
         // loader things
         addFabricMenuItem.addActionListener(e -> {
@@ -708,6 +717,44 @@ public class InstanceCard extends CollapsiblePanel {
                 setCursor(new Cursor(Cursor.DEFAULT_CURSOR));
             }
         });
+    }
+
+    // the default game options from settings, merged into this instance's options.txt; its other options are kept
+    private void applyDefaultGameOptions() {
+        if (App.settings.defaultGameOptions.isEmpty()) {
+            DialogManager.okDialog().setTitle(GetText.tr("No Default Game Options"))
+                    .setContent(new HTMLBuilder().center().text(GetText.tr(
+                            "No default game options are set. Choose them in Settings > Java/Minecraft."))
+                            .build())
+                    .show();
+            return;
+        }
+
+        int ret = DialogManager.yesNoDialog().setTitle(GetText.tr("Apply Default Game Options?"))
+                .setContent(new HTMLBuilder().center().text(GetText.tr(
+                        "This sets the default game options from Settings in this instance's options.txt. Its other "
+                                + "options are kept.<br/><br/>Close the game first if this instance is running, or "
+                                + "it may write over them."))
+                        .build())
+                .setType(DialogManager.QUESTION).show();
+        if (ret != 0) {
+            return;
+        }
+
+        try {
+            Map<String, String> applied = OptionsTxt.applyDefaults(instance.getRoot(),
+                    App.settings.defaultGameOptions, instance.releaseTime);
+            App.TOASTER.pop(applied.isEmpty()
+                    // #. {0} is the Minecraft version
+                    ? GetText.tr("None of the default game options exist in Minecraft {0}", instance.id)
+                    // #. {0} is how many options were written
+                    : GetText.tr("Set {0} game options", applied.size()));
+        } catch (IOException e) {
+            LogManager.logStackTrace("Failed to apply the default game options", e);
+            DialogManager.okDialog().setTitle(GetText.tr("Error"))
+                    .setContent(GetText.tr("The game options couldn't be written. Check the logs for details."))
+                    .setType(DialogManager.ERROR).show();
+        }
     }
 
     public Instance getInstance() {
