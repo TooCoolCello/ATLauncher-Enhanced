@@ -66,6 +66,8 @@ public class InstanceLauncher {
     public Integer initialMemory;
     // whether its Java settings keep the minimum and maximum memory together; null uses the launcher's
     public Boolean memoryLinked;
+    // the RemoteServer this instance is linked to, for uploads; null if none (also when upstream saved the file)
+    public String remoteServerId;
     public Integer permGen;
     public String javaPath;
     public String javaArguments;

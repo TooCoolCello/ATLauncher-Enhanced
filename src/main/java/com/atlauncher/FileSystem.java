@@ -75,6 +75,9 @@ public final class FileSystem {
     // saved Modrinth collections from before the collections library; only read, to carry them over
     public static final Path MODRINTH_COLLECTIONS = CONFIGS.resolve("modrinth_collections.json");
     public static final Path COLLECTIONS = CONFIGS.resolve("collections.json");
+    // remote SFTP servers, and the host keys the user chose to trust for them (OpenSSH known_hosts format)
+    public static final Path REMOTE_SERVERS = CONFIGS.resolve("remote_servers.json");
+    public static final Path REMOTE_SERVERS_KNOWN_HOSTS = CONFIGS.resolve("remote_servers_known_hosts");
 
     /**
      * This will organise the file system. This will remove old folders, create
