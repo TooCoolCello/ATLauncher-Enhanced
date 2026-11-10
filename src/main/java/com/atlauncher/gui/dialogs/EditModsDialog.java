@@ -78,6 +78,7 @@ import com.atlauncher.App;
 import com.atlauncher.builders.HTMLBuilder;
 import com.atlauncher.data.BulkUpdateCheck;
 import com.atlauncher.data.DisableableMod;
+import com.atlauncher.data.InstalledDependencies;
 import com.atlauncher.data.Instance;
 import com.atlauncher.data.ModManagement;
 import com.atlauncher.data.Server;
@@ -864,40 +865,56 @@ public class EditModsDialog extends JDialog {
     }
 
     private void removeMods() {
-        int ret = DialogManager.yesNoDialog(false)
-            .setTitle(GetText.tr("Delete Selected Mods?"))
-            .setContent(new HTMLBuilder().center().text(GetText.tr(
-                    "This will delete the selected mods from the instance.<br/><br/>Are you sure you want to do this?"))
-                .build())
-            .setType(DialogManager.WARNING).show();
+        removeMods(rows().filter(AbstractButton::isSelected).map(ModsJCheckBox::getDisableableMod)
+            .collect(Collectors.toList()), true);
+    }
 
-        if (ret == 0) {
-            ArrayList<ModsJCheckBox> mods = new ArrayList<>(enabledMods);
-            for (ModsJCheckBox mod : mods) {
-                if (mod.isSelected()) {
-                    instanceOrServer.getMods().remove(mod.getDisableableMod());
-                    FileUtils.delete(
-                        (mod.getDisableableMod().isDisabled()
-                            ? mod.getDisableableMod().getDisabledFile(instanceOrServer)
-                            : mod.getDisableableMod().getFile(instanceOrServer)).toPath(),
-                        true);
-                    enabledMods.remove(mod);
+    /**
+     * Removes mods. When other installed mods need them, or they leave dependencies nothing else needs, it first asks
+     * what to do (see {@link ModRemovalDialog}); otherwise it asks only when {@code confirm} is set, as the row menu's
+     * Remove never asked.
+     */
+    public void removeMods(List<DisableableMod> selected, boolean confirm) {
+        InstalledDependencies deps = InstalledDependencies.of(instanceOrServer);
+        List<DisableableMod> affected = deps.brokenByAll(selected);
+        List<DisableableMod> withoutData = deps.withoutData(selected);
+        InstalledDependencies.Plan plan;
+
+        if (!affected.isEmpty() || !deps.unneededAfter(selected, selected).isEmpty()) {
+            plan = ModRemovalDialog.ask(this, deps, selected, affected, withoutData);
+            if (plan == null) {
+                return;
+            }
+        } else {
+            if (confirm) {
+                String notes = ModRemovalDialog.dataNotes(withoutData, selected.stream()
+                    .filter(m -> !InstalledDependencies.hasData(m)).collect(Collectors.toList()));
+                int ret = DialogManager.yesNoDialog(false)
+                    .setTitle(GetText.tr("Delete Selected Mods?"))
+                    .setContent(new HTMLBuilder().center().text(GetText.tr(
+                            "This will delete the selected mods from the instance.<br/><br/>Are you sure you want to do this?")
+                            + (notes == null ? "" : "<br/><br/>" + escape(notes).replace("\n", "<br/>")))
+                        .split(100).build())
+                    .setType(DialogManager.WARNING).show();
+                if (ret != 0) {
+                    return;
                 }
             }
-            mods = new ArrayList<>(disabledMods);
-            for (ModsJCheckBox mod : mods) {
-                if (mod.isSelected()) {
-                    instanceOrServer.getMods().remove(mod.getDisableableMod());
-                    FileUtils.delete(
-                        (mod.getDisableableMod().isDisabled()
-                            ? mod.getDisableableMod().getDisabledFile(instanceOrServer)
-                            : mod.getDisableableMod().getFile(instanceOrServer)).toPath(),
-                        true);
-                    disabledMods.remove(mod);
-                }
-            }
-            reloadPanels();
+            plan = deps.plan(selected, InstalledDependencies.DependentsChoice.REMOVE_ANYWAY,
+                Collections.emptyList());
         }
+
+        plan.disable.forEach(mod -> mod.disable(instanceOrServer));
+        for (DisableableMod mod : plan.remove) {
+            instanceOrServer.getMods().remove(mod);
+            FileUtils.delete((mod.isDisabled() ? mod.getDisabledFile(instanceOrServer)
+                : mod.getFile(instanceOrServer)).toPath(), true);
+        }
+        reloadPanels();
+    }
+
+    private static String escape(String text) {
+        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
     private void refreshMetadata() {

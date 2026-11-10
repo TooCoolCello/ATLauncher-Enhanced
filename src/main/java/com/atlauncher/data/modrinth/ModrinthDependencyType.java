@@ -24,5 +24,11 @@ public enum ModrinthDependencyType {
     REQUIRED,
 
     @SerializedName("optional")
-    OPTIONAL
+    OPTIONAL,
+
+    @SerializedName("incompatible")
+    INCOMPATIBLE,
+
+    @SerializedName("embedded")
+    EMBEDDED
 }

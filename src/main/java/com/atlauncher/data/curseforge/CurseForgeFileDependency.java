@@ -35,4 +35,8 @@ public class CurseForgeFileDependency {
     public boolean isOptional() {
         return this.relationType == 2;
     }
+
+    public boolean isIncompatible() {
+        return this.relationType == 5;
+    }
 }
