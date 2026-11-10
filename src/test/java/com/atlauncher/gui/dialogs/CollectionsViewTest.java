@@ -18,21 +18,33 @@
 package com.atlauncher.gui.dialogs;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.Component;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
+import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
+import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
+import javax.swing.JMenu;
+import javax.swing.JMenuItem;
 import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
+import javax.swing.event.PopupMenuEvent;
+import javax.swing.event.PopupMenuListener;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import com.atlauncher.constants.Constants;
 import com.atlauncher.data.Instance;
@@ -47,6 +59,7 @@ import com.atlauncher.data.modrinth.ModrinthProjectType;
 import com.atlauncher.gui.layouts.WrapLayout;
 import com.atlauncher.utils.CollectionsLibrary;
 import com.atlauncher.utils.CollectionsLibrary.Item;
+import com.atlauncher.utils.CollectionsLibrary.LocalCollection;
 import com.atlauncher.utils.CollectionsLibrary.Resolved;
 
 /**
@@ -203,5 +216,130 @@ public class CollectionsViewTest {
         assertEquals(Arrays.asList("CurseForge 238222 Mods LIST", "Modrinth AANobbMI Mods LIST"), made);
         assertEquals(Arrays.asList("CurseForge 1 (CurseForge)", "CurseForge 2 (CurseForge)"), left);
         assertEquals(3, results.getComponentCount());
+    }
+
+    @Test
+    public void aLocalCollectionsProjectIsShownInTheSectionItWasAddedFrom() {
+        CollectionsLibrary.Providers providers = new CollectionsLibrary.Providers() {
+            @Override
+            public List<ModrinthProject> modrinth(List<String> ids) {
+                return Arrays.asList(project("DataPck1", ModrinthProjectType.MOD, "fabric", "datapack"),
+                    project("Plugin01", ModrinthProjectType.MOD, "fabric", "paper"));
+            }
+
+            @Override
+            public List<CurseForgeProject> curseForge(List<Integer> ids) {
+                return Arrays.asList(curseForgeProject(5, Constants.CURSEFORGE_RESOURCE_PACKS_SECTION_ID),
+                    curseForgeProject(1, Constants.CURSEFORGE_MODPACKS_SECTION_ID));
+            }
+        };
+        // a Modrinth mod added as a data pack; one added as a plugin, which this instance has no section for; and a
+        // modpack, which is never offered whatever it was recorded as
+        List<Resolved> found = CollectionsLibrary.resolve(Arrays.asList(
+            new Item(ModPlatform.MODRINTH, "DataPck1", "Data Packs", null),
+            new Item(ModPlatform.MODRINTH, "Plugin01", "Plugins", null),
+            new Item(ModPlatform.CURSEFORGE, "5", "Resource Packs", null),
+            new Item(ModPlatform.CURSEFORGE, "1", "Mods", null)), providers).found;
+
+        List<String> made = new ArrayList<>();
+        List<String> left = CollectionsDialog.renderLocal(new JPanel(), found, fabric(), ResultsView.CARDS,
+            (hit, section, view) -> {
+                made.add(hit.projectId + " " + section);
+                return new JLabel(hit.title);
+            }, (project, section, view) -> {
+                made.add(project.id + " " + section);
+                return new JLabel(project.name);
+            });
+
+        assertEquals(Arrays.asList("DataPck1 Data Packs", "Plugin01 Mods", "5 Resource Packs"), made);
+        assertEquals(Collections.singletonList("CurseForge 1 (CurseForge)"), left);
+    }
+
+    // --- a result's right-click menu
+
+    @TempDir
+    Path temp;
+
+    private static List<String> labels(JPopupMenu menu) {
+        List<String> labels = new ArrayList<>();
+        for (Component component : menu.getComponents()) {
+            labels.add(component instanceof JMenuItem ? ((JMenuItem) component).getText() : "-");
+        }
+        return labels;
+    }
+
+    private static JPopupMenu open(JComponent card) {
+        JPopupMenu menu = card.getComponentPopupMenu();
+        for (PopupMenuListener listener : menu.getPopupMenuListeners()) {
+            listener.popupMenuWillBecomeVisible(new PopupMenuEvent(menu));
+        }
+        return menu;
+    }
+
+    @Test
+    public void aResultsMenuKeepsRelatedAndAddsItToFavoritesAndCollections() throws IOException {
+        CollectionsLibrary library = new CollectionsLibrary(temp.resolve("collections.json"), null);
+        LocalCollection building = library.createCollection("Building");
+        JPanel card = new JPanel();
+        JButton add = new JButton("Add");
+        card.add(add);
+        AtomicInteger related = new AtomicInteger();
+        AtomicInteger changed = new AtomicInteger();
+        Item sodium = new Item(ModPlatform.MODRINTH, "AANobbMI", "Mods", "Sodium");
+
+        CollectionsDialog.offerMenu(card, () -> library, sodium, null, related::incrementAndGet,
+            changed::incrementAndGet);
+        // wherever on it the click lands
+        assertTrue(add.getInheritsPopupMenu());
+        JPopupMenu menu = open(card);
+        assertEquals(Arrays.asList("Related...", "-", "Add to Favorites", "Add to Collection"), labels(menu));
+        JMenu addTo = (JMenu) menu.getComponent(3);
+        assertEquals(Arrays.asList("Building", "-", "New Collection..."), labels(addTo.getPopupMenu()));
+
+        ((JMenuItem) menu.getComponent(0)).doClick(0);
+        assertEquals(1, related.get());
+        ((JMenuItem) menu.getComponent(2)).doClick(0);
+        ((JMenuItem) addTo.getMenuComponent(0)).doClick(0);
+        assertTrue(library.isFavorite(ModPlatform.MODRINTH, "AANobbMI"));
+        assertTrue(library.contains(building.id, ModPlatform.MODRINTH, "AANobbMI"));
+        assertEquals("Mods", building.items.get(0).section);
+        assertEquals(2, changed.get());
+
+        // made afresh each time it opens
+        assertEquals("Remove from Favorites", labels(open(card)).get(2));
+        ((JMenuItem) card.getComponentPopupMenu().getComponent(2)).doClick(0);
+        assertFalse(library.isFavorite(ModPlatform.MODRINTH, "AANobbMI"));
+
+        // no Related where it isn't offered
+        JPanel other = new JPanel();
+        CollectionsDialog.offerMenu(other, () -> library, sodium, null, null, () -> {
+        });
+        assertEquals(Arrays.asList("Add to Favorites", "Add to Collection"), labels(open(other)));
+    }
+
+    @Test
+    public void aResultInTheCollectionOpenCanBeRemovedFromIt() throws IOException {
+        CollectionsLibrary library = new CollectionsLibrary(temp.resolve("collections.json"), null);
+        LocalCollection building = library.createCollection("Building");
+        Item jei = new Item(ModPlatform.CURSEFORGE, "238222", "Mods", "JEI");
+        library.addTo(building.id, jei);
+        library.addFavorite(jei);
+        AtomicInteger changed = new AtomicInteger();
+
+        JPopupMenu menu = new JPopupMenu();
+        CollectionsDialog.fillMenu(menu, library, jei, null, building, changed::incrementAndGet);
+        assertEquals(Arrays.asList("Remove from Favorites", "Add to Collection", "-", "Remove from this collection"),
+            labels(menu));
+        ((JMenuItem) menu.getComponent(3)).doClick(0);
+        assertFalse(library.contains(building.id, ModPlatform.CURSEFORGE, "238222"));
+        assertEquals(1, changed.get());
+
+        // in Favorites, removing it from this collection is removing it from Favorites, offered once
+        menu = new JPopupMenu();
+        CollectionsDialog.fillMenu(menu, library, jei, null, library.favorites(), () -> {
+        });
+        assertEquals(Arrays.asList("Add to Collection", "-", "Remove from this collection"), labels(menu));
+        ((JMenuItem) menu.getComponent(2)).doClick(0);
+        assertFalse(library.isFavorite(ModPlatform.CURSEFORGE, "238222"));
     }
 }

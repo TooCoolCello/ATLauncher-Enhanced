@@ -68,7 +68,7 @@ Tests for these are under `src/test/java/com/atlauncher/` (same package as each 
 
 | Feature | Where in the UI | Key paths |
 |---|---|---|
-| Collections (Favorites, your own collections, saved Modrinth collections) and a Cards / Compact List / List picker | Add Mods > Collections... | `gui/dialogs/CollectionsDialog.java`, `utils/CollectionsLibrary.java`, `utils/ModrinthCollections.java`, `data/ResultsView.java`, `gui/card/ResultRow.java` |
+| Collections (Favorites, your own collections, saved Modrinth collections) and a Cards / Compact List / List picker | Add Mods > Collections...; New Collection... / Rename... / Delete... under its Library list. Right-click any result (Add Mods, Collections, Related): Add to / Remove from Favorites, Add to Collection > (yours, New Collection...), and Remove from this collection while one of yours or Favorites is open | `gui/dialogs/CollectionsDialog.java` (`offerMenu`), `utils/CollectionsLibrary.java`, `utils/ModrinthCollections.java`, `data/ResultsView.java`, `gui/card/ResultRow.java` |
 | Loader icons in every results view | Add Mods, Collections | `gui/card/LoaderIndicatorStrip.java` (restored after the view rework dropped it) |
 | Evidence-based mod compatibility, contextual Sinytra Connector mark, Hide incompatible | Add Mods results and bottom bar; selector Connector note | `data/ModCompatibility.java`, `data/ModCompatibilityChecker.java` (Modrinth checks spaced 250 ms apart), `gui/card/CompatibilityBadge.java` |
 | Flag / hide incompatible modpacks | Packs tab, "Hide incompatible packs" | `data/PackCompatibility.java`, `gui/card/packbrowser/IncompatiblePackFlag.java`, `gui/tabs/PacksBrowserTab.java` |

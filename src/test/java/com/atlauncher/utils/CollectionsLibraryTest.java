@@ -196,6 +196,139 @@ public class CollectionsLibraryTest {
         assertEquals("First", library.findModrinth(ID).name);
     }
 
+    // --- the user's own collections
+
+    private static List<String> names(CollectionsLibrary library) {
+        return library.localCollections().stream().map(c -> c.name).collect(Collectors.toList());
+    }
+
+    private static List<String> keys(CollectionsLibrary.LocalCollection collection) {
+        return collection.items.stream().map(Item::key).collect(Collectors.toList());
+    }
+
+    @Test
+    public void collectionsAreMadeRenamedAndDeletedByName() throws IOException {
+        CollectionsLibrary library = library();
+        CollectionsLibrary.LocalCollection building = library.createCollection("  Building ");
+        CollectionsLibrary.LocalCollection tech = library.createCollection("Tech");
+        assertEquals("Building", building.name);
+
+        // never empty, never one already used, whatever its case, Favorites' included
+        assertThrows(IllegalArgumentException.class, () -> library.createCollection("   "));
+        assertThrows(IllegalArgumentException.class, () -> library.createCollection(null));
+        assertThrows(IllegalArgumentException.class, () -> library.createCollection(" building"));
+        assertThrows(IllegalArgumentException.class, () -> library.createCollection("FAVORITES"));
+        assertNull(library.nameProblem("Magic", null));
+        assertTrue(library.nameProblem("tech", null).contains("tech"));
+        assertThrows(IllegalArgumentException.class, () -> library.renameCollection(tech.id, "Building"));
+
+        // its own name, in another case, is fine
+        library.renameCollection(tech.id, " TECH ");
+        assertEquals("TECH", tech.name);
+        assertThrows(IllegalArgumentException.class,
+            () -> library.renameCollection(CollectionsLibrary.FAVORITES_ID, "Liked"));
+        assertThrows(IllegalArgumentException.class,
+            () -> library.deleteCollection(CollectionsLibrary.FAVORITES_ID));
+        assertThrows(IllegalArgumentException.class, () -> library.renameCollection("nope", "Liked"));
+
+        assertEquals(Arrays.asList("Building", "TECH"), names(library()));
+        assertTrue(library.deleteCollection(building.id));
+        assertFalse(library.deleteCollection(building.id));
+        assertEquals(Collections.singletonList("TECH"), names(library()));
+        assertEquals(tech.id, library().localCollections().get(0).id);
+    }
+
+    @Test
+    public void projectsAreAddedToACollectionOnceAndRemoved() throws IOException {
+        CollectionsLibrary library = library();
+        CollectionsLibrary.LocalCollection mine = library.createCollection("Mine");
+        Item jei = new Item(ModPlatform.CURSEFORGE, "238222", "Mods", "JEI");
+        Item pack = new Item(ModPlatform.MODRINTH, "AANobbMI", "Resource Packs", "Pack");
+
+        assertTrue(library.addTo(mine.id, jei));
+        assertTrue(library.addTo(mine.id, pack));
+        // already there: said, not added again
+        assertFalse(library.addTo(mine.id, new Item(ModPlatform.CURSEFORGE, "238222", "Mods", "JEI again")));
+        // collections are apart from Favorites
+        assertFalse(library.isFavorite(ModPlatform.CURSEFORGE, "238222"));
+        assertTrue(library.contains(mine.id, ModPlatform.CURSEFORGE, "238222"));
+        assertFalse(library.contains("nope", ModPlatform.CURSEFORGE, "238222"));
+        assertThrows(IllegalArgumentException.class, () -> library.addTo("nope", jei));
+        assertThrows(IllegalArgumentException.class,
+            () -> library.addTo(mine.id, new Item(ModPlatform.CURSEFORGE, "x", null, null)));
+
+        // a copy is kept, with only a section Add Mods has
+        jei.name = "changed";
+        Item odd = new Item(ModPlatform.CURSEFORGE, "306612", "Nonsense", "Odd");
+        assertTrue(library.addTo(mine.id, odd));
+        assertEquals("JEI", mine.items.get(0).name);
+
+        CollectionsLibrary reopened = library();
+        CollectionsLibrary.LocalCollection read = reopened.find(mine.id);
+        assertEquals(Arrays.asList("CURSEFORGE:238222", "MODRINTH:AANobbMI", "CURSEFORGE:306612"), keys(read));
+        assertEquals("Resource Packs", read.items.get(1).section);
+        assertNull(read.items.get(2).section);
+
+        assertTrue(reopened.removeFrom(mine.id, ModPlatform.MODRINTH, "AANobbMI"));
+        assertFalse(reopened.removeFrom(mine.id, ModPlatform.MODRINTH, "AANobbMI"));
+        assertFalse(reopened.removeFrom(CollectionsLibrary.FAVORITES_ID, ModPlatform.MODRINTH, "AANobbMI"));
+        assertEquals(Arrays.asList("CURSEFORGE:238222", "CURSEFORGE:306612"), keys(library().find(mine.id)));
+    }
+
+    @Test
+    public void aCollectionWithNoNameIsNamedByItsId() throws IOException {
+        write(file(), "{\"version\": 1, \"collections\": [{\"id\": \"ok-1\"}, {\"id\": \"ok-2\", \"name\": \" \"}]}");
+        assertEquals(Arrays.asList("ok-1", "ok-2"), names(library()));
+    }
+
+    @Test
+    public void aChangeThatCantBeWrittenIsUndone() throws IOException {
+        CollectionsLibrary library = library();
+        CollectionsLibrary.LocalCollection mine = library.createCollection("Mine");
+        CollectionsLibrary.LocalCollection other = library.createCollection("Other");
+        library.addTo(mine.id, new Item(ModPlatform.CURSEFORGE, "238222", "Mods", "JEI"));
+        library.addTo(mine.id, new Item(ModPlatform.MODRINTH, "AANobbMI", "Mods", "Sodium"));
+        library.addFavorite(new Item(ModPlatform.CURSEFORGE, "306612", "Mods", "Fav"));
+        library.saveModrinth(found("Performance", "P1"));
+        String before = read(file());
+
+        // nothing can be written while the temporary file's place is taken
+        Files.createDirectories(file().resolveSibling("collections.json.tmp"));
+
+        assertThrows(IOException.class,
+            () -> library.addFavorite(new Item(ModPlatform.MODRINTH, "AAAAAAAA", "Mods", "New")));
+        assertThrows(IOException.class, () -> library.removeFavorite(ModPlatform.CURSEFORGE, "306612"));
+        assertThrows(IOException.class, () -> library.createCollection("Third"));
+        assertThrows(IOException.class, () -> library.renameCollection(mine.id, "Renamed"));
+        assertThrows(IOException.class, () -> library.deleteCollection(mine.id));
+        assertThrows(IOException.class,
+            () -> library.addTo(other.id, new Item(ModPlatform.CURSEFORGE, "238222", "Mods", "JEI")));
+        assertThrows(IOException.class, () -> library.removeFrom(mine.id, ModPlatform.CURSEFORGE, "238222"));
+        assertThrows(IOException.class, () -> library.saveModrinth(found("Performance v2", "P1", "P2")));
+        assertThrows(IOException.class, () -> library.refreshModrinth(found("Performance v3", "P1")));
+        assertThrows(IOException.class, () -> library.removeModrinth(ID));
+        assertEquals(before, read(file()));
+
+        // memory is as the file is: same order, same names, same projects
+        assertEquals(Arrays.asList("Mine", "Other"), names(library));
+        assertEquals("Mine", mine.name);
+        assertEquals(Arrays.asList("CURSEFORGE:238222", "MODRINTH:AANobbMI"), keys(mine));
+        assertTrue(other.items.isEmpty());
+        assertEquals(Collections.singletonList("CURSEFORGE:306612"), keys(library.favorites()));
+        assertEquals(1, library.modrinthCollections().size());
+        assertEquals("Performance", library.findModrinth(ID).name);
+        assertEquals(1, library.findModrinth(ID).projectCount);
+
+        // and once it can be written, the next change is, with nothing from those that failed
+        Files.delete(file().resolveSibling("collections.json.tmp"));
+        assertTrue(library.removeFrom(mine.id, ModPlatform.MODRINTH, "AANobbMI"));
+        CollectionsLibrary reopened = library();
+        assertEquals(Arrays.asList("Mine", "Other"), names(reopened));
+        assertEquals(Collections.singletonList("CURSEFORGE:238222"), keys(reopened.find(mine.id)));
+        assertEquals(Collections.singletonList("CURSEFORGE:306612"), keys(reopened.favorites()));
+        assertEquals("Performance", reopened.findModrinth(ID).name);
+    }
+
     // --- saved Modrinth collections, and those saved before
 
     @Test
@@ -239,7 +372,11 @@ public class CollectionsLibraryTest {
         assertFalse(library.isReadable());
         assertThrows(IOException.class,
             () -> library.addFavorite(new Item(ModPlatform.MODRINTH, "AANobbMI", null, null)));
+        assertThrows(IOException.class, () -> library.createCollection("Mine"));
         assertEquals("{ not json", read(file()));
+        // and isn't shown as changed
+        assertTrue(library.favorites().items.isEmpty());
+        assertTrue(library.localCollections().isEmpty());
     }
 
     @Test
@@ -424,16 +561,16 @@ public class CollectionsLibraryTest {
         Instance forge = new Instance(version);
         forge.launcher = new InstanceLauncher();
         forge.launcher.loaderVersion = new LoaderVersion("47.3.0", false, "Forge");
-        assertTrue(CollectionsLibrary.curseForgeOffers("Mods", forge));
-        assertTrue(CollectionsLibrary.curseForgeOffers("Worlds", forge));
-        assertFalse(CollectionsLibrary.curseForgeOffers("Plugins", forge));
-        assertFalse(CollectionsLibrary.curseForgeOffers(null, forge));
+        assertTrue(CollectionsLibrary.offers("Mods", forge));
+        assertTrue(CollectionsLibrary.offers("Worlds", forge));
+        assertFalse(CollectionsLibrary.offers("Plugins", forge));
+        assertFalse(CollectionsLibrary.offers(null, forge));
 
         Server paper = new Server();
         paper.minecraftVersion = "1.20.1";
         paper.loaderVersion = new LoaderVersion("1.20.1-196", false, "Paper");
-        assertTrue(CollectionsLibrary.curseForgeOffers("Plugins", paper));
-        assertFalse(CollectionsLibrary.curseForgeOffers("Mods", paper));
-        assertFalse(CollectionsLibrary.curseForgeOffers("Resource Packs", paper));
+        assertTrue(CollectionsLibrary.offers("Plugins", paper));
+        assertFalse(CollectionsLibrary.offers("Mods", paper));
+        assertFalse(CollectionsLibrary.offers("Resource Packs", paper));
     }
 }
