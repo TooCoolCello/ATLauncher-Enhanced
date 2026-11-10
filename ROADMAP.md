@@ -81,6 +81,9 @@ Tests for these are under `src/test/java/com/atlauncher/` (same package as each 
 | Related mods (same author, addons search, dependencies) | Right-click a Mods result > Related... | `data/RelatedMods.java`, `gui/dialogs/RelatedModsDialog.java` |
 | Dependency choices (install / keep / replace / skip / enable; incompatible mods; removal checks) | Selectors' Dependencies panel; Edit Mods removal | `data/DependencyChoice.java`, `data/InstalledDependencies.java`, `gui/components/DependencyChoicesPanel.java`, `gui/dialogs/ModRemovalDialog.java` |
 | Zip extraction refuses entries that leave the target folder | every zip import | `utils/ArchiveUtils.java` |
+| Sinytra-aware updates: a mod keeps its installed loader path (native or Fabric via Connector) | Edit Mods update arrows, Check For Updates | `data/DisableableMod.java`, `data/SinytraConnector.java`; test `SinytraModUpdateTest` |
+| Minimum Java heap (`-Xms`), separate from maximum, with a linked range slider | Settings > Java/Minecraft; instance Settings | `gui/components/MemoryRangeSlider.java`, `gui/components/HeapFlagsPreview.java`, `InstanceLauncher.initialMemory` |
+| Generate a pack's `defaultconfigs` from a world's configs, and manage the current ones | Instance card > Manage World Config Defaults... (Forge/NeoForge) | `utils/DefaultConfigsFromWorld.java`, `gui/dialogs/ManageWorldConfigDefaultsDialog.java`, `gui/dialogs/WorldConfigDefaultsDialogs.java` |
 
 ## 2b. Committed on a fork branch
 
