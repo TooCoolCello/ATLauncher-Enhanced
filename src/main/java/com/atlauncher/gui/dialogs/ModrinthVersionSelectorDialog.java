@@ -49,6 +49,7 @@ import com.atlauncher.constants.Constants;
 import com.atlauncher.data.AddModRestriction;
 import com.atlauncher.data.DisableableMod;
 import com.atlauncher.data.LoaderChoice;
+import com.atlauncher.data.ModCompatibility;
 import com.atlauncher.data.ModManagement;
 import com.atlauncher.data.RequiredDependency;
 import com.atlauncher.data.SinytraConnector;
@@ -549,38 +550,9 @@ public class ModrinthVersionSelectorDialog extends JDialog {
             return false;
         }
 
-        if (loaders.contains("fabric")
-            && (loaderVersion.isFabric()
-            || loaderVersion.isLegacyFabric()
-            || loaderVersion.isQuilt()
-            || fabricFallbackAllowed)) {
-            return true;
-        }
-
-        if (loaders.contains("legacy-fabric") && loaderVersion.isLegacyFabric()) {
-            return true;
-        }
-
-        if (loaders.contains("neoforge") && loaderVersion.isNeoForge()) {
-            return true;
-        }
-
-        if ((loaders.contains("paper") || loaders.contains("bukkit") || loaders.contains("spigot"))
-            && loaderVersion.isPaper()) {
-            return true;
-        }
-
-        if ((loaders.contains("purpur") || loaders.contains("paper") || loaders.contains("bukkit")
-            || loaders.contains("spigot"))
-            && loaderVersion.isPurpur()) {
-            return true;
-        }
-
-        if (loaders.contains("forge") && (loaderVersion.isForge() || (loaderVersion.isNeoForge() && forgeCompatible))) {
-            return true;
-        }
-
-        return loaders.contains("quilt") && loaderVersion.isQuilt();
+        // the same native rule Add Mods' compatibility marks use
+        return ModCompatibility.nativeTags(loaderVersion, forgeCompatible).stream().anyMatch(loaders::contains)
+            || (fabricFallbackAllowed && loaders.contains("fabric"));
     }
 
     /**
