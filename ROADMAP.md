@@ -74,7 +74,7 @@ Tests for these are under `src/test/java/com/atlauncher/` (same package as each 
 | Flag / hide incompatible modpacks | Packs tab, "Hide incompatible packs" | `data/PackCompatibility.java`, `gui/card/packbrowser/IncompatiblePackFlag.java`, `gui/tabs/PacksBrowserTab.java` |
 | Default game options (FOV, sensitivity, render distance, GUI scale, auto-jump, master volume) for new instances | Settings > Java/Minecraft; Edit Instance > Apply Default Game Options | `utils/OptionsTxt.java`, `data/DefaultGameOptions.java`, `workers/InstanceInstaller.java` |
 | Client/server side per mod (manual, else Modrinth, else CurseForge) | Edit Mods right-click > Side | `data/ModSide.java`, `DisableableMod.getEffectiveSide()`; used by Modrinth export env and Sync |
-| Remote servers over SFTP (trust-on-first-use host keys, password per session only), link an instance, upload with backups | Servers tab > Remote Servers...; Edit Instance > Link Remote Server / Upload | `data/RemoteServer.java`, `network/sftp/*`, `gui/dialogs/RemoteServer*.java`; library `com.github.mwiede:jsch` |
+| Remote servers over SFTP (trust-on-first-use host keys, password per session unless remembered), link an instance, upload with backups; on Windows a password can be remembered (Remember tick, then a confirmation; DPAPI, `configs/remote_servers_passwords.json`) | Servers tab > Remote Servers...; Edit Instance > Link Remote Server / Upload | `data/RemoteServer.java`, `network/sftp/*`, `gui/dialogs/RemoteServer*.java`; library `com.github.mwiede:jsch` |
 | Sync with Server (preview; stops on Minecraft/loader mismatch; skips client-only mods; replaced and removed files always go to `atlauncher-backups/`) | Edit Instance > Sync with ... | `network/sftp/ServerDetection.java`, `ServerSync.java`, `gui/dialogs/ServerSyncDialog.java` |
 | Make an instance from a server (SFTP, folder or server pack zip) | Import Instance > From a Server...; Remote Servers > Make Instance... | `network/sftp/ServerImport.java`, `gui/dialogs/ServerImportDialog.java` |
 | Add mods from someone else's modpack or another instance | Add Mods > From Modpack... | `data/PackMods.java`, `gui/dialogs/PackModsDialog.java` |
@@ -166,14 +166,16 @@ Build note: Gradle 8.12.1 can't run on Java 25. Use JDK 17, for example
 
 ## 4. Planned
 
-Phases A–F are built (section 2, "On `consolidated`"). Their user-facing defaults still await the
-user's answers. Known follow-ups:
+Phases A–F are built (section 2, "On `consolidated`"). The user accepted the defaults on 2026-11-10,
+except remembering SFTP passwords, which is now an opt-in (below). Known follow-ups:
 
 - Hand-test every feature in section 2's `consolidated` table; none has been clicked through yet.
-- Paper/Purpur servers: Sync and Import report their loader as unknown.
+- Paper/Purpur servers: Sync and Import report their loader as unknown. Later goal: support them, with a
+  plugin browser like the Add Mods browser (Modrinth lists plugins; Hangar and SpigotMC are other sources).
 - Disable Selected in Edit Mods doesn't warn about mods that need what's being disabled (removal does).
 - "Often used together in modpacks" for Related was skipped: the only data would be packs the user opened.
-- Remembering SFTP passwords needs a safe store (Windows DPAPI via jna-platform is one option).
+- Fix base ATLauncher deleting the old jar before a same-project update downloads (`Instance`/`Server`
+  `addFileFromModrinth`/`addFileFromCurseForge`): after the user has tested this build.
 - Sync/Import pair jars by name, size and hash, not by the mod IDs inside jars (`mods.toml`, `fabric.mod.json`).
 
 ## 5. Needs source verification

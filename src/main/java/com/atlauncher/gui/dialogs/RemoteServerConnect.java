@@ -27,9 +27,11 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
+import javax.swing.JCheckBox;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JPasswordField;
@@ -44,7 +46,9 @@ import org.mini2Dx.gettext.GetText;
 import com.atlauncher.FileSystem;
 import com.atlauncher.data.RemoteServer;
 import com.atlauncher.managers.DialogManager;
+import com.atlauncher.managers.LogManager;
 import com.atlauncher.network.sftp.JschSftpClient;
+import com.atlauncher.network.sftp.SavedSecrets;
 import com.atlauncher.network.sftp.SftpClient;
 
 /**
@@ -52,8 +56,9 @@ import com.atlauncher.network.sftp.SftpClient;
  * needed: the password or key passphrase, and whether to trust a host seen for the first time.
  *
  * <p>
- * The launcher has no safe place to save secrets (account tokens are plain JSON), so passwords and passphrases are
- * only kept in memory, by server, until the launcher closes. They're never written to disk or logged.
+ * Passwords and passphrases are kept in memory, by server, until the launcher closes, and never logged. On Windows the
+ * user can also tick Remember, and after the connection works and they confirm, it's saved encrypted with their Windows
+ * account ({@link SavedSecrets}). Elsewhere the launcher has no safe place for secrets, so nothing is saved.
  */
 public final class RemoteServerConnect {
     private static final Map<String, byte[]> SECRETS = new ConcurrentHashMap<>();
@@ -69,7 +74,12 @@ public final class RemoteServerConnect {
     public static SftpClient connect(Window parent, RemoteServer server) throws IOException {
         byte[] secret = SECRETS.get(server.id);
         if (secret == null) {
-            secret = server.usesKey() ? askPassphrase(parent, server) : askPassword(parent, server);
+            secret = loadSaved(server.id);
+        }
+        AtomicBoolean remember = new AtomicBoolean(false);
+        if (secret == null) {
+            secret = server.usesKey() ? askPassphrase(parent, server, remember)
+                : askPassword(parent, server, remember);
             if (secret == null) {
                 return null;
             }
@@ -82,6 +92,14 @@ public final class RemoteServerConnect {
                     .equals(onEdt(() -> trustHost(parent, server, type, fingerprint))));
             // only a secret that worked is remembered
             SECRETS.put(server.id, secret);
+            if (remember.get() && Boolean.TRUE.equals(onEdt(() -> confirmRemember(parent, server)))) {
+                try {
+                    SavedSecrets.save(FileSystem.REMOTE_SERVERS_PASSWORDS, server.id, secret);
+                } catch (IOException e) {
+                    LogManager.logStackTrace("Couldn't remember the password for a remote server", e);
+                    showError(parent, GetText.tr("Remember Password"), e);
+                }
+            }
             return client;
         } catch (IOException e) {
             if (e instanceof JschSftpClient.AuthFailedException) {
@@ -95,12 +113,34 @@ public final class RemoteServerConnect {
     }
 
     /**
-     * Forgets the password or passphrase remembered for a server, such as after it's edited or removed.
+     * Forgets the password or passphrase remembered for a server, in memory and saved, such as after it's edited or
+     * removed, or the server refused it.
      */
     public static void forget(String serverId) {
         byte[] secret = SECRETS.remove(serverId);
         if (secret != null) {
             Arrays.fill(secret, (byte) 0);
+        }
+        try {
+            SavedSecrets.remove(FileSystem.REMOTE_SERVERS_PASSWORDS, serverId);
+        } catch (IOException e) {
+            LogManager.logStackTrace("Couldn't forget a saved remote server password", e);
+        }
+    }
+
+    /**
+     * Whether the user chose to save this server's password or passphrase on this computer.
+     */
+    public static boolean isSaved(String serverId) {
+        return SavedSecrets.has(FileSystem.REMOTE_SERVERS_PASSWORDS, serverId);
+    }
+
+    private static byte[] loadSaved(String serverId) {
+        try {
+            return SavedSecrets.load(FileSystem.REMOTE_SERVERS_PASSWORDS, serverId);
+        } catch (IOException e) {
+            LogManager.logStackTrace("Couldn't read the saved remote server passwords", e);
+            return null;
         }
     }
 
@@ -129,21 +169,23 @@ public final class RemoteServerConnect {
         return area;
     }
 
-    private static byte[] askPassword(Window parent, RemoteServer server) {
+    private static byte[] askPassword(Window parent, RemoteServer server, AtomicBoolean remember) {
         // #. {0} is the username and server, such as name.1a2b3c4d@node.example.com:2022
         return onEdt(() -> askSecret(parent, GetText.tr("Password Required"),
-            GetText.tr("Password for {0}:", server.username + "@" + server.host + ":" + server.port)));
+            GetText.tr("Password for {0}:", server.username + "@" + server.host + ":" + server.port), remember));
     }
 
     // the key's passphrase, or an empty array if it has none
-    private static byte[] askPassphrase(Window parent, RemoteServer server) throws IOException {
+    private static byte[] askPassphrase(Window parent, RemoteServer server, AtomicBoolean remember)
+        throws IOException {
         if (!JschSftpClient.keyNeedsPassphrase(server.privateKeyPath)) {
             return new byte[0];
         }
         String prompt = GetText.tr("Passphrase for the private key {0}:", server.privateKeyPath);
         while (true) {
             String shown = prompt;
-            byte[] passphrase = onEdt(() -> askSecret(parent, GetText.tr("Passphrase Required"), shown));
+            byte[] passphrase = onEdt(() -> askSecret(parent, GetText.tr("Passphrase Required"), shown,
+                remember));
             if (passphrase == null || JschSftpClient.passphraseMatches(server.privateKeyPath, passphrase)) {
                 return passphrase;
             }
@@ -153,7 +195,8 @@ public final class RemoteServerConnect {
         }
     }
 
-    private static byte[] askSecret(Window parent, String title, String prompt) {
+    // remember is set to whether Remember was ticked; it's confirmed once the connection works
+    private static byte[] askSecret(Window parent, String title, String prompt, AtomicBoolean remember) {
         JPasswordField field = new JPasswordField(24);
         field.addAncestorListener(new AncestorListener() {
             @Override
@@ -172,8 +215,14 @@ public final class RemoteServerConnect {
         JPanel panel = new JPanel(new BorderLayout(0, 6));
         panel.add(new JLabel(prompt), BorderLayout.NORTH);
         panel.add(field, BorderLayout.CENTER);
-        panel.add(new JLabel(GetText.tr("It's kept in memory until the launcher closes, and never saved.")),
-            BorderLayout.SOUTH);
+        JCheckBox rememberBox = new JCheckBox(GetText.tr("Remember it on this computer"));
+        if (SavedSecrets.available()) {
+            rememberBox.setToolTipText(GetText.tr("Otherwise it's kept in memory until the launcher closes"));
+            panel.add(rememberBox, BorderLayout.SOUTH);
+        } else {
+            panel.add(new JLabel(GetText.tr("It's kept in memory until the launcher closes, and never saved.")),
+                BorderLayout.SOUTH);
+        }
 
         int ret = DialogManager.okCancelDialog().setParent(parent).setTitle(title).setContent(panel)
             .setType(DialogManager.QUESTION).show();
@@ -182,6 +231,7 @@ public final class RemoteServerConnect {
             if (ret != 0) {
                 return null;
             }
+            remember.set(rememberBox.isSelected());
             ByteBuffer encoded = StandardCharsets.UTF_8.encode(CharBuffer.wrap(chars));
             byte[] bytes = new byte[encoded.remaining()];
             encoded.get(bytes);
@@ -193,6 +243,22 @@ public final class RemoteServerConnect {
         } finally {
             Arrays.fill(chars, '\0');
         }
+    }
+
+    private static boolean confirmRemember(Window parent, RemoteServer server) {
+        String text = (server.usesKey()
+            ? GetText.tr("Save the passphrase for the private key {0} on this computer?", server.privateKeyPath)
+            : GetText.tr("Save the password for {0} on this computer?",
+                server.username + "@" + server.host + ":" + server.port))
+            + "\n\n"
+            + GetText.tr("It's encrypted with your Windows account, so another computer or another Windows user can't "
+                + "read it. But any program running as you could read it, and so could anyone who signs in as you.")
+            + "\n\n"
+            + (server.usesKey() ? "" : GetText.tr("Logging in with a private key is safer.") + " ")
+            + GetText.tr("You can forget it at any time with Forget Password in Remote Servers > Edit.");
+        return DialogManager.optionDialog().setParent(parent).setTitle(GetText.tr("Remember Password?"))
+            .setContent(message(text)).setType(DialogManager.WARNING)
+            .addOption(GetText.tr("Remember It"), true).addOption(GetText.tr("Don't Remember")).show() == 0;
     }
 
     private static boolean trustHost(Window parent, RemoteServer server, String keyType, String fingerprint) {

@@ -64,6 +64,7 @@ import com.atlauncher.data.RemoteServer;
 import com.atlauncher.managers.DialogManager;
 import com.atlauncher.managers.LogManager;
 import com.atlauncher.network.sftp.JschSftpClient;
+import com.atlauncher.network.sftp.SavedSecrets;
 import com.atlauncher.network.sftp.SftpClient;
 
 /**
@@ -405,9 +406,12 @@ public final class RemoteServersDialog extends JDialog {
             row = addRow(form, row, GetText.tr("Server Folder:"), folder);
             addRow(form, row, GetText.tr("Notes:"), new JScrollPane(notes));
 
-            JLabel secrets = new JLabel("<html><div style='width:380px'>" + GetText.tr("Passwords and passphrases "
-                + "aren't saved: you're asked once each time the launcher starts. Pterodactyl's SFTP port is usually "
-                + "2022.") + "</div></html>");
+            JLabel secrets = new JLabel("<html><div style='width:380px'>" + (SavedSecrets.available()
+                ? GetText.tr("You're asked for the password or passphrase once each time the launcher starts, unless "
+                    + "you tick Remember when asked.")
+                : GetText.tr("Passwords and passphrases aren't saved: you're asked once each time the launcher "
+                    + "starts."))
+                + " " + GetText.tr("Pterodactyl's SFTP port is usually 2022.") + "</div></html>");
 
             JButton test = new JButton(GetText.tr("Test Connection"));
             test.addActionListener(e -> {
@@ -420,6 +424,14 @@ public final class RemoteServersDialog extends JDialog {
             forget.setToolTipText(GetText.tr("Forget the saved host key, so the next connection asks to trust the "
                 + "server again"));
             forget.addActionListener(e -> forgetHostKey());
+            JButton forgetPassword = new JButton(GetText.tr("Forget Password"));
+            forgetPassword.setToolTipText(GetText.tr("Delete the password or passphrase saved on this computer"));
+            forgetPassword.setVisible(server.name != null && RemoteServerConnect.isSaved(server.id));
+            forgetPassword.addActionListener(e -> {
+                RemoteServerConnect.forget(server.id);
+                forgetPassword.setVisible(false);
+                status.setText(GetText.tr("The saved password was forgotten."));
+            });
             JButton save = new JButton(GetText.tr("Save"));
             save.addActionListener(e -> {
                 result = readValid();
@@ -433,6 +445,7 @@ public final class RemoteServersDialog extends JDialog {
             JPanel actions = new JPanel(new FlowLayout(FlowLayout.LEADING, 4, 0));
             actions.add(test);
             actions.add(forget);
+            actions.add(forgetPassword);
             JPanel window = new JPanel(new FlowLayout(FlowLayout.TRAILING, 4, 0));
             window.add(save);
             window.add(cancel);

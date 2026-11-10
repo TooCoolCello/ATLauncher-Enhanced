@@ -78,6 +78,8 @@ public final class FileSystem {
     // remote SFTP servers, and the host keys the user chose to trust for them (OpenSSH known_hosts format)
     public static final Path REMOTE_SERVERS = CONFIGS.resolve("remote_servers.json");
     public static final Path REMOTE_SERVERS_KNOWN_HOSTS = CONFIGS.resolve("remote_servers_known_hosts");
+    // DPAPI-encrypted passwords the user chose to remember (Windows only)
+    public static final Path REMOTE_SERVERS_PASSWORDS = CONFIGS.resolve("remote_servers_passwords.json");
 
     /**
      * This will organise the file system. This will remove old folders, create

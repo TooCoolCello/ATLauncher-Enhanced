@@ -40,7 +40,8 @@ import com.google.gson.reflect.TypeToken;
 
 /**
  * A remote server reached over SFTP, such as a Pterodactyl server. Saved in configs/remote_servers.json. Passwords and
- * passphrases are never part of it: they're asked for once per launcher session and kept in memory only.
+ * passphrases are never part of it: they're asked for once per launcher session, or saved encrypted apart from it
+ * when the user chooses (see SavedSecrets).
  */
 public class RemoteServer {
     public enum Auth {
