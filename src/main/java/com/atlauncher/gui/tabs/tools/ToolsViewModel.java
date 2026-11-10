@@ -17,11 +17,13 @@
  */
 package com.atlauncher.gui.tabs.tools;
 
+import java.awt.Window;
 import java.io.File;
 import java.net.InetAddress;
 import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.Locale;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
@@ -30,6 +32,7 @@ import com.atlauncher.FileSystem;
 import com.atlauncher.constants.Constants;
 import com.atlauncher.evnt.listener.SettingsListener;
 import com.atlauncher.evnt.manager.SettingsManager;
+import com.atlauncher.gui.dialogs.ProgressDialog;
 import com.atlauncher.managers.AccountManager;
 import com.atlauncher.managers.LogManager;
 import com.atlauncher.network.Analytics;
@@ -71,6 +74,31 @@ public class ToolsViewModel implements SettingsListener {
         Analytics.trackEvent(AnalyticsEvent.forToolRun("debug_mode"));
 
         OS.relaunchInDebugMode();
+    }
+
+    /**
+     * Runs a tool's work off the UI thread, which deleting thousands of files would freeze, behind a progress dialog
+     * that keeps the rest of the launcher waiting (so nothing launches while libraries go). Then, on the UI thread,
+     * done, unless the work failed or the progress dialog was closed first.
+     */
+    static void runWithProgress(Window parent, String title, Runnable work, Runnable done) {
+        AtomicBoolean finished = new AtomicBoolean(false);
+        ProgressDialog<Void> progress = new ProgressDialog<>(title, 0, title, null, parent);
+        progress.addThread(new Thread(() -> {
+            try {
+                work.run();
+                finished.set(true);
+            } catch (RuntimeException e) {
+                LogManager.logStackTrace(title + " failed", e);
+            } finally {
+                progress.close();
+            }
+        }));
+        progress.start();
+
+        if (finished.get()) {
+            done.run();
+        }
     }
 
     public void clearDownloads() {

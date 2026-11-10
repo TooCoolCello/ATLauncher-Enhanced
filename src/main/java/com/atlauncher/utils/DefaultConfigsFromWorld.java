@@ -18,6 +18,7 @@
 package com.atlauncher.utils;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -197,6 +198,9 @@ public final class DefaultConfigsFromWorld {
                 .filter(file -> isInside(file, realServerConfig))
                 .map(file -> serverConfig.relativize(file).toString().replace('\\', '/')).sorted()
                 .collect(Collectors.toList());
+        } catch (UncheckedIOException e) {
+            // a folder inside that can't be read, or went while walking
+            throw e.getCause();
         }
     }
 
@@ -336,6 +340,9 @@ public final class DefaultConfigsFromWorld {
                         attributes.size(), attributes.lastModifiedTime()));
                 }
             }
+        } catch (UncheckedIOException e) {
+            // a folder inside that can't be read, or went while walking
+            throw e.getCause();
         }
         configs.sort(Comparator.comparing(config -> config.relative));
         return configs;

@@ -27,14 +27,22 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AccessDeniedException;
+import java.nio.file.DirectoryStream;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.AclEntry;
+import java.nio.file.attribute.AclEntryPermission;
+import java.nio.file.attribute.AclEntryType;
+import java.nio.file.attribute.AclFileAttributeView;
 import java.nio.file.attribute.FileTime;
+import java.nio.file.attribute.PosixFilePermission;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.AfterEach;
@@ -873,5 +881,66 @@ public class DefaultConfigsFromWorldTest {
         write(defaults("sub/README.TXT"), "notes");
 
         assertEquals(Arrays.asList("readme.txt", "sub/README.TXT"), listed());
+    }
+
+    // --- folders that can't be read
+
+    private interface Restore {
+        void run() throws IOException;
+    }
+
+    private final List<Restore> restore = new ArrayList<>();
+
+    @AfterEach
+    public void restorePermissions() throws IOException {
+        for (Restore undo : restore) {
+            undo.run();
+        }
+    }
+
+    // makes a folder unlistable, and undoes it after the test so the temporary folder can be removed
+    private void assumeUnreadable(Path folder) throws IOException {
+        AclFileAttributeView acl = Files.getFileAttributeView(folder, AclFileAttributeView.class);
+        if (acl != null) {
+            List<AclEntry> before = acl.getAcl();
+            List<AclEntry> denied = new ArrayList<>(before);
+            denied.add(0, AclEntry.newBuilder().setType(AclEntryType.DENY).setPrincipal(Files.getOwner(folder))
+                .setPermissions(AclEntryPermission.LIST_DIRECTORY).build());
+            acl.setAcl(denied);
+            restore.add(() -> acl.setAcl(before));
+        } else {
+            Set<PosixFilePermission> before = Files.getPosixFilePermissions(folder);
+            Files.setPosixFilePermissions(folder, Collections.emptySet());
+            restore.add(() -> Files.setPosixFilePermissions(folder, before));
+        }
+
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(folder)) {
+            assumeTrue(false, "folders stay readable here (running as an administrator?)");
+        } catch (AccessDeniedException e) {
+            // as wanted
+        }
+    }
+
+    @Test
+    public void anUnreadableFolderInDefaultConfigsIsAnIoErrorTheManagerShows() throws IOException {
+        write(defaults("create-server.toml"), "a");
+        assumeUnreadable(Files.createDirectories(defaults("locked")));
+
+        // an IOException, which the manager shows, not an unchecked one that would leave it loading forever
+        assertThrows(IOException.class, () -> DefaultConfigsFromWorld.defaultConfigs(root));
+    }
+
+    @Test
+    public void anUnreadableFolderInServerConfigFailsWithAMessageAndCopiesNothing() throws IOException {
+        Path serverConfig = world("Survival").resolve("serverconfig");
+        write(serverConfig.resolve("create-server.toml"), "from the world");
+        assumeUnreadable(Files.createDirectories(serverConfig.resolve("locked")));
+
+        Answers answers = new Answers();
+        answers.world = "Survival";
+        answers.files = Collections.singletonList("create-server.toml");
+        assertEquals(Outcome.FAILED, run(answers));
+        assertEquals(1, answers.told.size());
+        assertFalse(Files.exists(defaults("create-server.toml")));
     }
 }

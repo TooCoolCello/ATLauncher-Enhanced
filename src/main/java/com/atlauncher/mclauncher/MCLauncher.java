@@ -293,6 +293,8 @@ public class MCLauncher {
         if (initialMemory > 0 && setsInitialHeap(javaArguments)) {
             LogManager.warn(
                 "Not passing the minimum memory setting, as the Java parameters already set an initial heap");
+        } else if (initialMemory > 0 && setsMaximumHeap(javaArguments)) {
+            LogManager.warn("Not passing the minimum memory setting, as the Java parameters set the maximum heap");
         } else if (initialMemory > effectiveMaximumMemory(maximumMemory, instance.getMemory(), OS.getMaximumRam())) {
             LogManager.warn("Minimum memory of " + initialMemory + "MB is more than the maximum, so using the maximum");
         }
@@ -485,14 +487,15 @@ public class MCLauncher {
     /**
      * The heap arguments, all in MB. -Xms comes first, only when a minimum is set (above 0) and the Java parameters
      * don't already set an initial heap, so it's never passed twice; it's capped at -Xmx, as Java won't start with a
-     * larger initial heap. -Xmx follows as it always has.
+     * larger initial heap. -Xmx follows as it always has. When the Java parameters set the maximum heap, theirs comes
+     * later and wins, so no -Xms is added: it could be more than that maximum, and Java wouldn't start.
      */
     static List<String> heapArguments(int maximumMemory, int initialMemory, int instanceMemory, int systemRam,
         String javaArguments) {
         int effectiveMaximum = effectiveMaximumMemory(maximumMemory, instanceMemory, systemRam);
         List<String> arguments = new ArrayList<>();
 
-        if (initialMemory > 0 && !setsInitialHeap(javaArguments)) {
+        if (initialMemory > 0 && !setsInitialHeap(javaArguments) && !setsMaximumHeap(javaArguments)) {
             arguments.add("-Xms" + Math.min(initialMemory, effectiveMaximum) + "M");
         }
 
@@ -540,13 +543,20 @@ public class MCLauncher {
 
         return new HeapPreview(heapArguments(maximumMemory, initialMemory, packMemory, systemRam, javaArguments),
             effectiveMaximum > maximumMemory, initialFromParameters, packRequiredMemory == null,
-            !initialFromParameters && initialMemory > effectiveMaximum, initialMemory);
+            !initialFromParameters && !setsMaximumHeap(javaArguments) && initialMemory > effectiveMaximum,
+            initialMemory);
     }
 
     // whether the Java parameters already set the initial heap, either way Java accepts it
     static boolean setsInitialHeap(String javaArguments) {
         return javaArguments != null && Arrays.stream(javaArguments.split(" "))
             .anyMatch(arg -> arg.startsWith("-Xms") || arg.startsWith("-XX:InitialHeapSize="));
+    }
+
+    // whether the Java parameters set the maximum heap (imported, or typed before the settings refuse it)
+    static boolean setsMaximumHeap(String javaArguments) {
+        return javaArguments != null && Arrays.stream(javaArguments.split(" "))
+            .anyMatch(arg -> arg.startsWith("-Xmx") || arg.startsWith("-XX:MaxHeapSize="));
     }
 
     private static String replaceArgument(String incomingArgument, Instance instance, MicrosoftAccount account,

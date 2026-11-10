@@ -18,6 +18,7 @@
 package com.atlauncher.gui.tabs.tools;
 
 import javax.swing.JLabel;
+import javax.swing.SwingUtilities;
 
 import org.mini2Dx.gettext.GetText;
 
@@ -36,10 +37,10 @@ public class LogClearerToolPanel extends AbstractToolPanel {
         BOTTOM_PANEL.add(LAUNCH_BUTTON);
         LAUNCH_BUTTON.addActionListener(e -> {
             if (e.getSource() == LAUNCH_BUTTON) {
-                viewModel.clearLogs();
-
-                DialogManager.okDialog().setType(DialogManager.INFO).setTitle(GetText.tr("Success"))
-                        .setContent(GetText.tr("Successfully cleared the logs.")).show();
+                ToolsViewModel.runWithProgress(SwingUtilities.getWindowAncestor(this),
+                        GetText.tr("Log Clearer"), viewModel::clearLogs,
+                        () -> DialogManager.okDialog().setType(DialogManager.INFO).setTitle(GetText.tr("Success"))
+                                .setContent(GetText.tr("Successfully cleared the logs.")).show());
             }
         });
     }
