@@ -349,12 +349,12 @@ public final class DialogManager {
         }
 
         List<Dialog> owned = deepestFirst(showingModalDialogs(Window.getWindows(), roots), Window::getOwner, roots);
-        List<Dialog> targets = recoverable(owned, d -> isActiveOperationDialog(d.getClass()));
+        List<Dialog> targets = recoverable(owned, DialogManager::isActiveOperation);
 
         if (targets.isEmpty() && !owned.isEmpty()) {
             LogManager.info("[RecoverUI] Active operation detected; skipped closing launcher modal dialogs");
             for (Dialog dialog : owned) {
-                if (isActiveOperationDialog(dialog.getClass())) {
+                if (isActiveOperation(dialog)) {
                     LogManager.info("[RecoverUI] Active operation: " + DialogDebugMonitor.describe(dialog));
                 }
             }
@@ -405,6 +405,17 @@ public final class DialogManager {
             }
         }
         return modals;
+    }
+
+    /**
+     * Set to true on a dialog's root pane while it runs an operation that closing it would cut short, such as an SFTP
+     * upload, sync or import. Recover UI then leaves the launcher's dialogs alone, as it does for a progress dialog.
+     */
+    public static final String OPERATION_RUNNING = "atlauncher.operationRunning";
+
+    static boolean isActiveOperation(Dialog dialog) {
+        return isActiveOperationDialog(dialog.getClass()) || (dialog instanceof JDialog
+                && Boolean.TRUE.equals(((JDialog) dialog).getRootPane().getClientProperty(OPERATION_RUNNING)));
     }
 
     /**

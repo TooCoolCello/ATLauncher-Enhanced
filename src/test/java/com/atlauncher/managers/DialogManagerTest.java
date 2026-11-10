@@ -20,6 +20,9 @@ package com.atlauncher.managers;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
+
+import java.awt.GraphicsEnvironment;
 
 import java.util.Arrays;
 import java.util.HashMap;
@@ -99,5 +102,20 @@ public class DialogManagerTest {
         assertFalse(DialogManager.isActiveOperationDialog(CurseForgeProjectFileSelectorDialog.class));
         assertFalse(DialogManager.isActiveOperationDialog(ModrinthVersionSelectorDialog.class));
         assertFalse(DialogManager.isActiveOperationDialog(EditModsDialog.class));
+    }
+
+    @Test
+    void aDialogRunningAnSftpTransferIsAnActiveOperation() {
+        assumeFalse(GraphicsEnvironment.isHeadless());
+        JDialog dialog = new JDialog();
+        try {
+            assertFalse(DialogManager.isActiveOperation(dialog));
+            dialog.getRootPane().putClientProperty(DialogManager.OPERATION_RUNNING, true);
+            assertTrue(DialogManager.isActiveOperation(dialog));
+            dialog.getRootPane().putClientProperty(DialogManager.OPERATION_RUNNING, false);
+            assertFalse(DialogManager.isActiveOperation(dialog));
+        } finally {
+            dialog.dispose();
+        }
     }
 }

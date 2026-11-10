@@ -223,6 +223,7 @@ public final class ServerSyncDialog extends JDialog {
 
     private void setBusy(boolean busy) {
         this.busy = busy;
+        getRootPane().putClientProperty(DialogManager.OPERATION_RUNNING, busy);
         boolean ready = !busy && model.changes.stream().anyMatch(c -> c.kind != ServerSync.Kind.UNCHANGED);
         check.setEnabled(!busy);
         close.setEnabled(!busy);

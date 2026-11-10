@@ -270,6 +270,7 @@ public final class ServerImportDialog extends JDialog {
         Path source = local;
         cancelRequested = false;
         busy = true;
+        getRootPane().putClientProperty(DialogManager.OPERATION_RUNNING, busy);
         updateFields();
         progress.setIndeterminate(true);
         new Thread(() -> {
@@ -290,6 +291,7 @@ public final class ServerImportDialog extends JDialog {
                 }
                 SwingUtilities.invokeLater(() -> {
                     busy = false;
+                    getRootPane().putClientProperty(DialogManager.OPERATION_RUNNING, false);
                     progress.setIndeterminate(false);
                     updateFields();
                 });

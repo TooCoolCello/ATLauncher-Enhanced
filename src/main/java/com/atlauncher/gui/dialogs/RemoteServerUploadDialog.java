@@ -272,6 +272,7 @@ public final class RemoteServerUploadDialog extends JDialog {
 
     private void setBusy(boolean busy) {
         this.busy = busy;
+        getRootPane().putClientProperty(DialogManager.OPERATION_RUNNING, busy);
         server.setEnabled(!busy);
         manage.setEnabled(!busy);
         addFiles.setEnabled(!busy);
