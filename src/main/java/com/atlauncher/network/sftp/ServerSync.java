@@ -53,8 +53,8 @@ import com.atlauncher.utils.Hashing;
  * KubeJS client scripts and assets are left out.
  *
  * <p>
- * Planning only reads the server. Applying uploads through {@link SftpUpload} (temporary names, optional backups) and
- * moves anything it removes into the same dated backup folder, so nothing is deleted.
+ * Planning only reads the server. Applying uploads through {@link SftpUpload} (temporary names) and moves every file it
+ * replaces or removes into one dated backup folder, so nothing is deleted.
  */
 public final class ServerSync {
     // compared file by file, besides mods
@@ -360,7 +360,8 @@ public final class ServerSync {
      */
     static boolean isServerFile(String relative) {
         String lower = relative.toLowerCase(Locale.ENGLISH);
-        return !lower.endsWith("-client.toml") && !lower.endsWith(SftpUpload.PARTIAL_SUFFIX);
+        return !lower.endsWith("-client.toml") && !lower.endsWith(SftpUpload.PARTIAL_SUFFIX)
+            && !lower.endsWith(SftpUpload.OLD_SUFFIX);
     }
 
     /**
@@ -378,11 +379,11 @@ public final class ServerSync {
      * Makes the server match the ticked changes, in order. Stops at the first error or cancel, and returns what was
      * done before it.
      *
-     * @param backUp whether replaced files go into the backup folder; removed files always do
+     * @param backupFolder where replaced and removed files are moved
      * @param progress told the change being made and the bytes uploaded so far; returns false to cancel
      */
-    public static Result apply(SftpClient client, String base, List<Change> changes, boolean backUp,
-            String backupFolder, BiPredicate<Change, Long> progress) {
+    public static Result apply(SftpClient client, String base, List<Change> changes, String backupFolder,
+            BiPredicate<Change, Long> progress) {
         Result result = new Result();
         for (Change change : changes) {
             if (!change.selected || change.kind == Kind.UNCHANGED) {
@@ -405,7 +406,7 @@ public final class ServerSync {
                     SftpClient.join(base, change.relative), change.size);
                 item.exists = change.kind == Kind.UPDATE && change.replaces == null;
                 SftpUpload.Result upload = SftpUpload.run(client, Collections.singletonList(item),
-                    backUp ? SftpUpload.Existing.BACK_UP_AND_REPLACE : SftpUpload.Existing.REPLACE, backupFolder,
+                    SftpUpload.Existing.BACK_UP_AND_REPLACE, backupFolder,
                     (i, done) -> progress.test(change, before + done));
                 if (upload.cancelled) {
                     result.cancelled = true;
@@ -425,12 +426,8 @@ public final class ServerSync {
                 }
                 // the new jar is in place, so the old one goes straight away: both loading would crash the server
                 if (change.replaces != null) {
-                    if (backUp) {
-                        moveToBackup(client, base, change.replaces, backupFolder);
-                        result.backupFolder = backupFolder;
-                    } else {
-                        client.remove(SftpClient.join(base, change.replaces));
-                    }
+                    moveToBackup(client, base, change.replaces, backupFolder);
+                    result.backupFolder = backupFolder;
                     result.replaced++;
                 }
             } catch (IOException e) {
