@@ -147,7 +147,7 @@ public final class RemoteServerConnect {
     /**
      * Shows a failure: the message alone, since every SFTP error is written to be read by the user.
      */
-    public static void showError(Window parent, String title, IOException e) {
+    public static void showError(Window parent, String title, Exception e) {
         onEdt(() -> DialogManager.okDialog().setParent(parent).setTitle(title)
             .setContent(message(e.getMessage() == null ? e.toString() : e.getMessage()))
             .setType(DialogManager.ERROR).show());

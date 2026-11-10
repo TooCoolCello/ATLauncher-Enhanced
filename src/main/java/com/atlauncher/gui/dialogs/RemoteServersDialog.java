@@ -34,6 +34,7 @@ import java.io.IOException;
 import java.nio.file.NoSuchFileException;
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultComboBoxModel;
@@ -202,7 +203,7 @@ public final class RemoteServersDialog extends JDialog {
         add.addActionListener(e -> add());
         edit.addActionListener(e -> edit());
         remove.addActionListener(e -> remove());
-        test.addActionListener(e -> testConnection(this, list.getSelectedValue(), status, test));
+        test.addActionListener(e -> testConnection(this, list.getSelectedValue(), status, test, false));
         makeInstance.setToolTipText(GetText.tr("Make a new instance from this server's Minecraft version, loader, "
             + "mods and configs"));
         makeInstance.addActionListener(e -> ServerImportDialog.open(this, list.getSelectedValue()));
@@ -311,8 +312,11 @@ public final class RemoteServersDialog extends JDialog {
 
     /**
      * Connects and lists the server's folder in the background, then shows how it went.
+     *
+     * @param forgetAfter whether to forget the password or passphrase afterwards, for a server id only used to test
      */
-    static void testConnection(Window parent, RemoteServer server, JLabel status, JButton button) {
+    static void testConnection(Window parent, RemoteServer server, JLabel status, JButton button,
+            boolean forgetAfter) {
         button.setEnabled(false);
         status.setText(GetText.tr("Connecting to {0}...", server.host + ":" + server.port));
         new Thread(() -> {
@@ -329,9 +333,14 @@ public final class RemoteServersDialog extends JDialog {
                         result = GetText.tr("Connected, but the folder {0} doesn't exist on the server.", folder);
                     }
                 }
-            } catch (IOException e) {
+            } catch (IOException | RuntimeException e) {
+                LogManager.logStackTrace("Couldn't test the remote server connection", e);
                 result = GetText.tr("Couldn't connect.");
                 RemoteServerConnect.showError(parent, GetText.tr("Test Connection"), e);
+            } finally {
+                if (forgetAfter) {
+                    RemoteServerConnect.forget(server.id);
+                }
             }
             String shown = result;
             SwingUtilities.invokeLater(() -> {
@@ -347,6 +356,8 @@ public final class RemoteServersDialog extends JDialog {
     private static final class ServerForm extends JDialog {
         private final RemoteServer original;
         private RemoteServer result = null;
+        // the login whose password or passphrase may be remembered under original.id; null if none can be yet
+        private RemoteServer secretLogin;
 
         private final JTextField name = new JTextField(24);
         private final JTextField host = new JTextField(24);
@@ -364,6 +375,7 @@ public final class RemoteServersDialog extends JDialog {
             super(parent, server.name == null ? GetText.tr("Add Remote Server") : GetText.tr("Edit Remote Server"),
                 ModalityType.DOCUMENT_MODAL);
             this.original = server;
+            this.secretLogin = server.name == null ? null : server;
             setDefaultCloseOperation(DISPOSE_ON_CLOSE);
 
             name.setText(server.name);
@@ -416,9 +428,17 @@ public final class RemoteServersDialog extends JDialog {
             JButton test = new JButton(GetText.tr("Test Connection"));
             test.addActionListener(e -> {
                 RemoteServer tested = readValid();
-                if (tested != null) {
-                    testConnection(this, tested, status, test);
+                if (tested == null) {
+                    return;
                 }
+                // another login's remembered password is never sent to this one, nor forgotten if this one fails
+                boolean otherLogin = secretLogin != null && !sameLogin(secretLogin, tested);
+                if (otherLogin) {
+                    tested.id = UUID.randomUUID().toString();
+                } else {
+                    secretLogin = tested;
+                }
+                testConnection(this, tested, status, test, otherLogin);
             });
             JButton forget = new JButton(GetText.tr("Forget Host Key..."));
             forget.setToolTipText(GetText.tr("Forget the saved host key, so the next connection asks to trust the "
@@ -436,6 +456,10 @@ public final class RemoteServersDialog extends JDialog {
             save.addActionListener(e -> {
                 result = readValid();
                 if (result != null) {
+                    // a new server tested with another login keeps nothing from it (edit() does this for edits)
+                    if (original.name == null && secretLogin != null && !sameLogin(secretLogin, result)) {
+                        RemoteServerConnect.forget(result.id);
+                    }
                     dispose();
                 }
             });

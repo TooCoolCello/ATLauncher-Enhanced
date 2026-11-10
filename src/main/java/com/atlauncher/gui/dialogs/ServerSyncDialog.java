@@ -150,6 +150,8 @@ public final class ServerSyncDialog extends JDialog {
         middle.add(new JScrollPane(table), BorderLayout.CENTER);
 
         check.addActionListener(e -> check());
+        // Apply turns into Cancel, so the second click of a double click mustn't cancel what the first started
+        apply.setMultiClickThreshhold(500);
         apply.addActionListener(e -> {
             if (busy) {
                 cancel();
@@ -303,7 +305,7 @@ public final class ServerSyncDialog extends JDialog {
                     : GetText.tr("Untick anything you don't want changed, then Apply."));
             } catch (InterruptedIOException e) {
                 setStatus(GetText.tr("Check cancelled. Nothing was changed."));
-            } catch (IOException e) {
+            } catch (IOException | RuntimeException e) {
                 LogManager.logStackTrace("Couldn't check the remote server for sync", e);
                 setStatus(GetText.tr("Couldn't check the server."));
                 RemoteServerConnect.showError(this, GetText.tr("Sync with Server"), e);
@@ -393,7 +395,7 @@ public final class ServerSyncDialog extends JDialog {
                     warnings.setVisible(false);
                 });
                 showResult(result, ticked.size());
-            } catch (IOException e) {
+            } catch (IOException | RuntimeException e) {
                 LogManager.logStackTrace("Couldn't sync with the remote server", e);
                 setStatus(GetText.tr("The sync failed."));
                 RemoteServerConnect.showError(this, GetText.tr("Sync with Server"), e);
