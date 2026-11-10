@@ -18,6 +18,7 @@
 package com.atlauncher.gui.tabs.tools;
 
 import javax.swing.JLabel;
+import javax.swing.SwingUtilities;
 
 import org.mini2Dx.gettext.GetText;
 
@@ -36,10 +37,10 @@ public class DownloadClearerToolPanel extends AbstractToolPanel {
         BOTTOM_PANEL.add(LAUNCH_BUTTON);
         LAUNCH_BUTTON.addActionListener(e -> {
             if (e.getSource() == LAUNCH_BUTTON) {
-                viewModel.clearDownloads();
-
-                DialogManager.okDialog().setType(DialogManager.INFO).setTitle(GetText.tr("Success"))
-                        .setContent(GetText.tr("Successfully cleared the downloads.")).show();
+                ToolsViewModel.runWithProgress(SwingUtilities.getWindowAncestor(this),
+                        GetText.tr("Download Clearer"), viewModel::clearDownloads,
+                        () -> DialogManager.okDialog().setType(DialogManager.INFO).setTitle(GetText.tr("Success"))
+                                .setContent(GetText.tr("Successfully cleared the downloads.")).show());
             }
         });
     }
