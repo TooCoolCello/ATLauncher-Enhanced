@@ -203,9 +203,23 @@ public final class DependencyChoicesPanel<F> extends JPanel implements Scrollabl
                 continue;
             }
 
-            // first, as the new file may have the same name as the one coming out
-            if (item.installed != null && item.replacesInstalled) {
-                instanceOrServer.removeMod(item.installed);
+            // the mod coming out is disabled, not removed, until its replacement is in, so a failed install can put
+            // it back; first, as the new file may have the same name
+            boolean replaces = item.installed != null && item.replacesInstalled;
+            boolean setAside = false;
+            if (replaces && !item.installed.isDisabled()) {
+                if (!item.installed.getFile(instanceOrServer).exists()) {
+                    // its file is already gone, so there's nothing to keep
+                    instanceOrServer.removeMod(item.installed);
+                    replaces = false;
+                } else if (item.installed.disable(instanceOrServer)) {
+                    setAside = true;
+                    instanceOrServer.save();
+                } else {
+                    problems.add(GetText.tr("{0}: the mod it replaces couldn't be set aside, so it wasn't installed.",
+                        item.title));
+                    continue;
+                }
             }
 
             if (progress != null) {
@@ -213,7 +227,12 @@ public final class DependencyChoicesPanel<F> extends JPanel implements Scrollabl
                 progress.setLabel(GetText.tr("Installing {0}", item.title));
             }
             if (!install.test(item, pick.file)) {
+                if (setAside) {
+                    item.installed.enable(instanceOrServer);
+                }
                 problems.add(GetText.tr("{0}: it couldn't be installed.", item.title));
+            } else if (replaces) {
+                instanceOrServer.removeMod(item.installed);
             }
         }
 
