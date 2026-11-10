@@ -150,6 +150,12 @@ public class ArchiveUtils {
                     outputPath = extractToPath.resolve(newFilename);
                 }
 
+                // zt-zip above refuses entries that leave the folder (zip slip); this fallback mustn't write them
+                if (!outputPath.toAbsolutePath().normalize()
+                        .startsWith(extractToPath.toAbsolutePath().normalize())) {
+                    throw new IOException("Refusing to extract " + entry.getName() + " outside " + extractToPath);
+                }
+
                 File f = outputPath.toFile();
                 if (entry.isDirectory()) {
                     if (!f.isDirectory() && !f.mkdirs()) {
