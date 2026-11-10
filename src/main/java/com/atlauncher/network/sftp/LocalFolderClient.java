@@ -23,6 +23,7 @@ import java.io.InterruptedIOException;
 import java.io.OutputStream;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -33,7 +34,8 @@ import java.util.stream.Stream;
 /**
  * An {@link SftpClient} over a folder on this computer, where "/" is the folder. It lets a server folder on this
  * computer be read the same way as a remote one (importing from a server), and stands in for a server in tests. It
- * behaves like a real server where it matters: rename refuses to replace, and paths can't leave the folder.
+ * behaves like a real server where it matters: rename refuses to replace, and paths can't leave the folder, through
+ * .. or through a link. Listings leave links out, so walking the folder can't leave it or loop.
  */
 public class LocalFolderClient implements SftpClient {
     private final Path root;
@@ -52,10 +54,20 @@ public class LocalFolderClient implements SftpClient {
     private Path local(String remote) throws IOException {
         String relative = remote.replace('\\', '/').replaceFirst("^/+", "");
         Path path = relative.isEmpty() || relative.equals(".") ? root : root.resolve(relative).normalize();
-        if (!path.startsWith(root)) {
+        if (!path.startsWith(root) || leavesRoot(path)) {
             throw new NoSuchFileException(remote);
         }
         return path;
+    }
+
+    // whether a link on the way to the path, or the path itself, leads out of the folder
+    private boolean leavesRoot(Path path) throws IOException {
+        for (Path existing = path; existing != null && existing.startsWith(root); existing = existing.getParent()) {
+            if (Files.exists(existing, LinkOption.NOFOLLOW_LINKS)) {
+                return !existing.toRealPath().startsWith(root.toRealPath());
+            }
+        }
+        return false;
     }
 
     @Override
@@ -64,18 +76,37 @@ public class LocalFolderClient implements SftpClient {
         if (!Files.isDirectory(folder)) {
             throw new NoSuchFileException(path);
         }
+        Path real = folder.toRealPath();
         List<RemoteFile> files = new ArrayList<>();
         try (Stream<Path> entries = Files.list(folder)) {
             for (Path entry : (Iterable<Path>) entries::iterator) {
-                files.add(file(entry, SftpClient.join(path, entry.getFileName().toString())));
+                // links (and Windows junctions) are left out: one could lead out of the folder, or loop back up it
+                if (!isLink(entry, real)) {
+                    files.add(file(entry, SftpClient.join(path, entry.getFileName().toString())));
+                }
             }
         }
         return files;
     }
 
+    private static boolean isLink(Path entry, Path realFolder) {
+        try {
+            return !entry.toRealPath().equals(realFolder.resolve(entry.getFileName()));
+        } catch (IOException e) {
+            // a link to nothing
+            return true;
+        }
+    }
+
     @Override
     public RemoteFile stat(String path) throws IOException {
-        Path file = local(path);
+        Path file;
+        try {
+            file = local(path);
+        } catch (NoSuchFileException e) {
+            // outside the folder, so not there
+            return null;
+        }
         return Files.exists(file) ? file(file, path) : null;
     }
 

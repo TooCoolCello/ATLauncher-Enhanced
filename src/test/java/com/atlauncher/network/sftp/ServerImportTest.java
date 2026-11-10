@@ -21,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -40,6 +41,7 @@ import org.junit.jupiter.api.io.TempDir;
 import com.atlauncher.data.ModSide;
 import com.atlauncher.data.minecraft.loaders.LoaderType;
 import com.atlauncher.data.modrinth.pack.ModrinthModpackManifest;
+import com.atlauncher.utils.OS;
 
 class ServerImportTest {
     @TempDir
@@ -80,6 +82,54 @@ class ServerImportTest {
         assertEquals(Arrays.asList("overrides/config/create-common.toml",
             "overrides/defaultconfigs/create-server.toml", "overrides/kubejs/server_scripts/recipes.js",
             "overrides/mods/create.jar"), files(folder));
+    }
+
+    // a link to a folder: a symbolic link, or on Windows without the right to make those, a junction
+    static void link(Path link, Path target) throws IOException {
+        try {
+            Files.createSymbolicLink(link, target);
+            return;
+        } catch (IOException | UnsupportedOperationException e) {
+            assumeTrue(OS.isWindows(), "Symbolic links can't be made here: " + e);
+        }
+        try {
+            Process mklink = new ProcessBuilder("cmd", "/c", "mklink", "/J", link.toString(), target.toString())
+                .redirectErrorStream(true).start();
+            assumeTrue(mklink.waitFor() == 0 && Files.isDirectory(link), "Junctions can't be made here");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException(e);
+        }
+    }
+
+    @Test
+    void gatherSkipsLinksThatLeaveTheServerFolderOrLoop() throws IOException {
+        Path server = temp.resolve("server");
+        Path outside = temp.resolve("outside");
+        write(server.resolve("config/create-common.toml"), "common");
+        write(outside.resolve("secret.toml"), "secret");
+        write(outside.resolve("mods/other.jar"), "other");
+        List<Path> links = Arrays.asList(server.resolve("config/out"), server.resolve("config/loop"),
+            server.resolve("mods"));
+        link(links.get(0), outside);
+        link(links.get(1), server.resolve("config"));
+        link(links.get(2), outside.resolve("mods"));
+        Path folder = temp.resolve("import");
+
+        try {
+            ServerImport.Gathered gathered = ServerImport.gather(new LocalDirSftpClient(server), "/", folder,
+                message -> true);
+
+            assertEquals(0, gathered.mods);
+            assertEquals(Collections.singletonList("overrides/config/create-common.toml"), files(folder));
+            // asked for directly, a file through a link out of the folder isn't there either
+            assertNull(new LocalDirSftpClient(server).stat("/config/out/secret.toml"));
+        } finally {
+            // the temp folder's clean-up would follow junctions into the loop
+            for (Path link : links) {
+                Files.deleteIfExists(link);
+            }
+        }
     }
 
     @Test
