@@ -32,13 +32,13 @@ import com.formdev.flatlaf.util.UIScale;
  * A note that wraps to whatever width its layout gives it. It only asks for a narrow width, so a long note never
  * widens the column it's in or squeezes the controls beside it; it grows taller instead.
  */
-final class WrappingLabel extends JLabel {
+public final class WrappingLabel extends JLabel {
     // the width it asks for, and wraps to before it's first laid out
     static final int NARROWEST = 200;
 
     private int laidOutWidth = -1;
 
-    WrappingLabel() {
+    public WrappingLabel() {
         addComponentListener(new ComponentAdapter() {
             @Override
             public void componentResized(ComponentEvent e) {
@@ -51,7 +51,7 @@ final class WrappingLabel extends JLabel {
         });
     }
 
-    void setWrappedText(String text) {
+    public void setWrappedText(String text) {
         setText(text == null ? "" : "<html>" + text + "</html>");
     }
 

@@ -103,6 +103,18 @@ public final class InstalledDependencies {
     }
 
     /**
+     * The enabled mods staying with no stored dependency data, so nothing can be said about what they need. Resource
+     * packs, shader packs and worlds are left out, as they don't need mods.
+     */
+    public List<DisableableMod> withoutData(Collection<DisableableMod> gone) {
+        return installed.stream().filter(m -> !gone.contains(m) && active(m) && needs.get(m) == null
+                && m.type != Type.resourcepack && m.type != Type.texturepack && m.type != Type.shaderpack
+                && m.type != Type.worlds && m.type != Type.resourcepackextract
+                && m.type != Type.texturepackextract)
+                .collect(Collectors.toList());
+    }
+
+    /**
      * Whether a mod's platform marks it as a library, the kind of mod usually installed only for others.
      */
     public static boolean isLibrary(DisableableMod mod) {

@@ -215,10 +215,16 @@ public class InstalledDependenciesTest {
         assertTrue(InstalledDependencies.hasData(modrinth("x")));
         assertTrue(InstalledDependencies.hasData(curseForge(5)));
 
-        // no data means it's never taken to need anything
+        // no data means it's never taken to need anything, and it's listed so the user is told
         DisableableMod lib = modrinth("lib");
         DisableableMod manual = noData("manual.jar");
-        assertTrue(of(FABRIC, false, lib, manual).brokenBy(Collections.singletonList(lib)).isEmpty());
+        manual.type = Type.mods;
+        DisableableMod pack = noData("pack.zip");
+        pack.type = Type.resourcepack;
+        InstalledDependencies deps = of(FABRIC, false, lib, manual, pack);
+        assertTrue(deps.brokenBy(Collections.singletonList(lib)).isEmpty());
+        assertEquals(Collections.singletonList(manual), deps.withoutData(Collections.singletonList(lib)));
+        assertTrue(deps.withoutData(Collections.singletonList(manual)).isEmpty());
     }
 
     @Test

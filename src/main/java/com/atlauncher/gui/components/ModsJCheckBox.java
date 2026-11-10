@@ -27,6 +27,7 @@ import java.awt.RenderingHints;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import javax.swing.ButtonGroup;
@@ -56,7 +57,6 @@ import com.atlauncher.gui.dialogs.EditModsDialog;
 import com.atlauncher.gui.dialogs.ModsChooser;
 import com.atlauncher.managers.DialogManager;
 import com.atlauncher.utils.OS;
-import com.atlauncher.utils.Utils;
 import com.formdev.flatlaf.extras.FlatSVGIcon;
 import com.formdev.flatlaf.util.UIScale;
 
@@ -511,14 +511,8 @@ public class ModsJCheckBox extends JCheckBox {
         contextMenu.add(new JPopupMenu.Separator());
 
         JMenuItem remove = new JMenuItem(GetText.tr("Remove"));
-        remove.addActionListener(e -> {
-            dialog.instanceOrServer.getMods().remove(getDisableableMod());
-            Utils.delete(
-                    (getDisableableMod().isDisabled() ? getDisableableMod().getDisabledFile(dialog.instanceOrServer)
-                            : getDisableableMod().getFile(dialog.instanceOrServer)));
-
-            dialog.reloadPanels();
-        });
+        // asks first only when other mods need it, or it leaves dependencies nothing else needs
+        remove.addActionListener(e -> dialog.removeMods(Collections.singletonList(getDisableableMod()), false));
         contextMenu.add(remove);
 
         if (getDisableableMod().isFromCurseForge() && getDisableableMod().isFromModrinth()) {
