@@ -53,6 +53,7 @@ public final class ModrinthSearchHitCard extends JPanel {
     private final JLabel installedLabel = new JLabel(
             Utils.getIconImage(App.THEME.getResourcePath("image", "tick")));
     private final ResultsView view;
+    private final CompatibilityBadge compatibility;
 
     public ModrinthSearchHitCard(final ModrinthSearchHit mod, final ModManagement instanceOrServer,
             ActionListener installAl,
@@ -88,7 +89,10 @@ public final class ModrinthSearchHitCard extends JPanel {
         });
         viewButton.addActionListener(e -> OS.openWebBrowser(String.format("https://modrinth.com/mod/%s", mod.slug)));
 
-        JPanel loaderStrip = LoaderIndicatorStrip.create(loaders, "Modrinth");
+        // the compatibility mark goes before the reported loaders; shown once Add Mods has a verdict
+        compatibility = new CompatibilityBadge(!view.isRow());
+        JPanel loaderStrip = CompatibilityBadge.withLoaders(compatibility,
+                LoaderIndicatorStrip.create(loaders, "Modrinth"));
 
         if (view.isRow()) {
             ResultRow.layout(this, view == ResultsView.COMPACT_LIST, icon, mod.title, mod.author, mod.description,
@@ -137,6 +141,13 @@ public final class ModrinthSearchHitCard extends JPanel {
 
         add(summaryPanel, BorderLayout.CENTER);
         add(buttonsPanel, BorderLayout.SOUTH);
+    }
+
+    /**
+     * Whether this result has a file for the instance, beside its loader icons.
+     */
+    public CompatibilityBadge compatibility() {
+        return compatibility;
     }
 
     @Override

@@ -62,6 +62,7 @@ import com.atlauncher.data.modrinth.ModrinthProject;
 import com.atlauncher.data.modrinth.ModrinthProjectType;
 import com.atlauncher.data.modrinth.ModrinthVersion;
 import com.atlauncher.exceptions.InvalidMinecraftVersion;
+import com.atlauncher.gui.card.CompatibilityBadge;
 import com.atlauncher.gui.card.ModrinthProjectDependencyCard;
 import com.atlauncher.managers.ConfigManager;
 import com.atlauncher.managers.DialogManager;
@@ -646,6 +647,8 @@ public class ModrinthVersionSelectorDialog extends JDialog {
         scrollPane.setPreferredSize(new Dimension(550, 250));
 
         connectorNoteLabel.setForeground(UIManager.getColor("yellow"));
+        // the same Sinytra mark Add Mods shows on results that only run through Connector
+        connectorNoteLabel.setIcon(CompatibilityBadge.connectorIcon());
         connectorNoteLabel.setVisible(false);
 
         loaderPanel.add(new JLabel(GetText.tr("Mod loader") + ": "));
