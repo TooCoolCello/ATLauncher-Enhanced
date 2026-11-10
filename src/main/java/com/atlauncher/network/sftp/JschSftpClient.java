@@ -26,6 +26,7 @@ import java.net.NoRouteToHostException;
 import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 import java.nio.file.AccessDeniedException;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
@@ -101,6 +102,11 @@ public final class JschSftpClient implements SftpClient {
             try {
                 jsch.addIdentity(server.privateKeyPath, secret == null ? null : secret.clone());
             } catch (JSchException e) {
+                if (secret != null && e.getMessage() != null && e.getMessage().startsWith("Incorrect passphrase")) {
+                    // a remembered passphrase the key no longer takes: an auth failure, so it's forgotten and asked
+                    throw new AuthFailedException(GetText.tr("The passphrase doesn't unlock the private key {0}.",
+                        server.privateKeyPath));
+                }
                 throw keyError(server.privateKeyPath, e);
             }
         }
@@ -361,6 +367,10 @@ public final class JschSftpClient implements SftpClient {
 
     @Override
     public void rename(String from, String to) throws IOException {
+        // JSch uses OpenSSH's posix-rename when offered, which replaces what's there; this interface never does
+        if (stat(to) != null) {
+            throw new FileAlreadyExistsException(to, null, GetText.tr("already exists on the server"));
+        }
         try {
             sftp.rename(from, to);
         } catch (SftpException e) {

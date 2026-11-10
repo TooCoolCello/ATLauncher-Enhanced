@@ -174,7 +174,9 @@ public final class ServerDetection {
             Matcher neoForge = NEOFORGE_INSTALLER_JAR.matcher(name);
             Matcher vanilla = VANILLA_JAR.matcher(name);
             if (forge.matches()) {
-                add(found, LoaderType.FORGE, forge.group(2), forge.group(1));
+                // 1.7.10's jars repeat the Minecraft version after Forge's, as its library folder does
+                String[] split = splitForge(forge.group(1) + "-" + forge.group(2));
+                add(found, LoaderType.FORGE, split[1], split[0]);
             } else if (neoForge.matches()) {
                 add(found, LoaderType.NEOFORGE, neoForge.group(1), neoForgeMinecraft(neoForge.group(1)));
             } else if (fabric.matches()) {

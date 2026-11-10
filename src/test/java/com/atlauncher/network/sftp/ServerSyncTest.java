@@ -214,6 +214,18 @@ class ServerSyncTest {
     }
 
     @Test
+    void aServerJarNameThisComputerCantUseStaysARemoval() throws IOException {
+        write(instance.resolve("mods/alpha-1.0.jar"), "a");
+        Files.createDirectories(server.resolve("mods"));
+        client = ServerImportTest.withUnusableName(server, "mods", "bad\0name.jar");
+
+        List<ServerSync.Change> changes = plan();
+
+        assertEquals(ServerSync.Kind.ADD, find(changes, "mods/alpha-1.0.jar").kind);
+        assertEquals(ServerSync.Kind.REMOVE, find(changes, "mods/bad\0name.jar").kind);
+    }
+
+    @Test
     void applyingUploadsAndBacksUpButNeverDeletes() throws IOException {
         driftApart();
         List<ServerSync.Change> changes = plan();
