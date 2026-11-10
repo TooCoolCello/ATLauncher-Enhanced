@@ -125,6 +125,7 @@ import com.atlauncher.data.modrinth.ModrinthVersion;
 import com.atlauncher.data.modrinth.pack.ModrinthModpackFile;
 import com.atlauncher.data.modrinth.pack.ModrinthModpackManifest;
 import com.atlauncher.data.multimc.MultiMCComponent;
+import com.atlauncher.data.multimc.MultiMCInstanceConfig;
 import com.atlauncher.data.multimc.MultiMCManifest;
 import com.atlauncher.data.multimc.MultiMCRequire;
 import com.atlauncher.exceptions.CommandException;
@@ -1495,8 +1496,8 @@ public class Instance extends MinecraftVersion implements ModManagement {
         instanceCfg.setProperty("LiteloaderVersion", "");
         instanceCfg.setProperty("LogPrePostOutput", "true");
         instanceCfg.setProperty("MCLaunchMethod", "LauncherPart");
-        instanceCfg.setProperty("MaxMemAlloc",
-            Optional.ofNullable(launcher.maximumMemory).orElse(App.settings.maximumMemory) + "");
+        MultiMCInstanceConfig.writeMemory(instanceCfg, launcher.maximumMemory, launcher.initialMemory,
+            App.settings.maximumMemory, App.settings.initialMemory);
         instanceCfg.setProperty("MinecraftWinHeight", App.settings.windowHeight + "");
         instanceCfg.setProperty("MinecraftWinWidth", App.settings.windowWidth + "");
         instanceCfg.setProperty("OverrideCommands",
@@ -1508,7 +1509,6 @@ public class Instance extends MinecraftVersion implements ModManagement {
         instanceCfg.setProperty("OverrideJavaArgs", launcher.javaArguments == null ? "false" : "true");
         instanceCfg.setProperty("OverrideJavaLocation", "false");
         instanceCfg.setProperty("OverrideMCLaunchMethod", "false");
-        instanceCfg.setProperty("OverrideMemory", launcher.maximumMemory == null ? "false" : "true");
         instanceCfg.setProperty("OverrideNativeWorkarounds", "false");
         instanceCfg.setProperty("OverrideWindow", "false");
         instanceCfg.setProperty("PermGen", Optional.ofNullable(launcher.permGen).orElse(App.settings.metaspace) + "");

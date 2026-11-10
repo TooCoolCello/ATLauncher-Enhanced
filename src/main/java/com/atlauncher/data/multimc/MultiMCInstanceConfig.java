@@ -35,6 +35,21 @@ public class MultiMCInstanceConfig {
     public String postExitCommand;
     public String wrapperCommand;
 
+    /**
+     * Writes the memory settings for a MultiMC export, so importing it back gives the same minimum and maximum. The
+     * instance's own values (null when it follows the launcher) make MultiMC apply them to this instance.
+     */
+    public static void writeMemory(Properties cfg, Integer instanceMaximum, Integer instanceInitial,
+            int launcherMaximum, int launcherInitial) {
+        int maximum = instanceMaximum == null ? launcherMaximum : instanceMaximum;
+        cfg.setProperty("MaxMemAlloc", maximum + "");
+        int initial = Settings.clampInitialMemory(instanceInitial == null ? launcherInitial : instanceInitial, maximum);
+        if (initial > 0) {
+            cfg.setProperty("MinMemAlloc", initial + "");
+        }
+        cfg.setProperty("OverrideMemory", instanceMaximum == null && instanceInitial == null ? "false" : "true");
+    }
+
     public MultiMCInstanceConfig(Properties props) {
         name = props.getProperty("name");
 

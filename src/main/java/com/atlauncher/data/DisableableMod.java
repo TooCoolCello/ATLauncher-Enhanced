@@ -517,6 +517,13 @@ public class DisableableMod implements Serializable {
             if (pair == null) {
                 return false;
             }
+            if (pair.left() == null) {
+                // the versions came back but the project didn't: the selector can't be shown without it
+                DialogManager.okDialog().setParent(parent).setTitle(GetText.tr("Check For Updates"))
+                        .setContent(GetText.tr("Couldn't get {0} from {1}. Try again later.", name, "Modrinth"))
+                        .setType(DialogManager.ERROR).show();
+                return true;
+            }
 
             ModrinthVersionSelectorDialog modrinthVersionSelectorDialog = new ModrinthVersionSelectorDialog(parent,
                     pair.left(), pair.right(), instanceOrServer, modrinthVersion.id, this.type,

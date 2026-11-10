@@ -77,4 +77,20 @@ public class MultiMCInstanceConfigMemoryTest {
         assertEquals(Integer.valueOf(2048),
                 config("OverrideMemory=true\nMinMemAlloc= 2048 \n").initialMemoryWithin(4096));
     }
+
+    @Test
+    public void anExportedMinimumComesBackOnImport() throws IOException {
+        // the instance's own minimum, maximum following the launcher
+        Properties cfg = new Properties();
+        MultiMCInstanceConfig.writeMemory(cfg, null, 2048, 8192, 0);
+        MultiMCInstanceConfig imported = new MultiMCInstanceConfig(cfg);
+        assertEquals(Integer.valueOf(2048), imported.initialMemoryWithin(imported.maximumMemory));
+        assertEquals(Integer.valueOf(8192), imported.maximumMemory);
+
+        // following the launcher for both: nothing applied to the instance, as before
+        Properties follows = new Properties();
+        MultiMCInstanceConfig.writeMemory(follows, null, null, 8192, 1024);
+        assertEquals("false", follows.getProperty("OverrideMemory"));
+        assertNull(new MultiMCInstanceConfig(follows).initialMemoryWithin(8192));
+    }
 }
