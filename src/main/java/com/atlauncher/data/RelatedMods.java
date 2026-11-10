@@ -22,10 +22,12 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import com.atlauncher.constants.Constants;
 import com.atlauncher.data.curseforge.CurseForgeFile;
 import com.atlauncher.data.curseforge.CurseForgeFileDependency;
+import com.atlauncher.data.curseforge.CurseForgeProject;
 import com.atlauncher.data.modrinth.ModrinthDependency;
 import com.atlauncher.data.modrinth.ModrinthDependencyType;
 import com.atlauncher.data.modrinth.ModrinthVersion;
@@ -110,6 +112,15 @@ public final class RelatedMods {
      */
     public static String modrinthUser(String author) {
         return author != null && MODRINTH_USER.matcher(author).matches() ? author : null;
+    }
+
+    /**
+     * The projects that list this author. CurseForge's search is asked for only theirs, but one that ignored the
+     * filter would answer with everyone's most popular projects, which mustn't be shown as the author's.
+     */
+    public static List<CurseForgeProject> byCurseForgeAuthor(List<CurseForgeProject> projects, int authorId) {
+        return projects.stream().filter(p -> p != null && p.authors != null
+                && p.authors.stream().anyMatch(a -> a != null && a.id == authorId)).collect(Collectors.toList());
     }
 
     /**
