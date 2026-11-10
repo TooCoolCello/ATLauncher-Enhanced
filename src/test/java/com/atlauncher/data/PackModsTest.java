@@ -355,7 +355,7 @@ public class PackModsTest {
         Row nativeMod = row(rows, "Mod native");
 
         PackMods.Dependencies needs = PackMods.dependencies(Collections.singletonList(nativeMod), rows, installed(),
-                Collections.emptyMap());
+                Collections.emptyMap(), NEOFORGE_CONNECTOR);
 
         // native needs fabricOnly, from the pack; fabricOnly needs "installed" (here) and "missing" (nowhere)
         assertEquals(1, needs.alsoAdd.size());
@@ -376,9 +376,48 @@ public class PackModsTest {
         files.put(101, file);
 
         assertTrue(PackMods.dependencies(Collections.singletonList(row), Collections.singletonList(row), installed(),
-                Collections.emptyMap()).missingCurseForge.isEmpty());
+                Collections.emptyMap(), NEOFORGE_ONLY).missingCurseForge.isEmpty());
         assertEquals(Collections.singleton(99), PackMods.dependencies(Collections.singletonList(row),
-                Collections.singletonList(row), installed(), files).missingCurseForge);
+                Collections.singletonList(row), installed(), files, NEOFORGE_ONLY).missingCurseForge);
+    }
+
+    @Test
+    public void connectorTakesForgifiedFabricApiForFabricApi() {
+        // a Fabric mod added through Connector, needing Fabric API on both sites
+        List<Row> modrinth = Collections.singletonList(new Row("Fabric Mod", ModPlatform.MODRINTH,
+                project("fm", ModrinthProjectType.MOD), "fm", version("fm", "fabric", Constants.MODRINTH_FABRIC_MOD_ID),
+                null, null, null, Status.VIA_CONNECTOR, "", null));
+        CurseForgeFile file = new CurseForgeFile();
+        file.id = 201;
+        CurseForgeFileDependency fabricApi = new CurseForgeFileDependency();
+        fabricApi.modId = Constants.CURSEFORGE_FABRIC_MOD_ID;
+        fabricApi.relationType = 3;
+        file.dependencies = Collections.singletonList(fabricApi);
+        Map<Integer, CurseForgeFile> files = new HashMap<>();
+        files.put(201, file);
+        List<Row> curseForge = Collections.singletonList(new Row("CF Fabric Mod", ModPlatform.CURSEFORGE, null, null,
+                null, curseForge(20, Constants.CURSEFORGE_MODS_SECTION_ID), 20, 201, Status.VIA_CONNECTOR, "", null));
+
+        // Forgified Fabric API added from CurseForge only covers it on both sites
+        DisableableMod forgified = new DisableableMod();
+        forgified.curseForgeProjectId = Constants.CURSEFORGE_FORGIFIED_FABRIC_API_MOD_ID;
+        forgified.curseForgeFileId = 1;
+        PackMods.Installed withForgified = PackMods.Installed.of(Collections.singletonList(forgified));
+        assertTrue(PackMods.dependencies(modrinth, modrinth, withForgified, files, NEOFORGE_CONNECTOR).missingModrinth
+                .isEmpty());
+        assertTrue(PackMods.dependencies(curseForge, curseForge, withForgified, files, NEOFORGE_CONNECTOR)
+                .missingCurseForge.isEmpty());
+
+        // without it, Forgified Fabric API is named, never Fabric API, which Connector refuses
+        assertEquals(Collections.singleton(Constants.MODRINTH_FORGIFIED_FABRIC_API_MOD_ID),
+                PackMods.dependencies(modrinth, modrinth, installed(), files, NEOFORGE_CONNECTOR).missingModrinth);
+        assertEquals(Collections.singleton(Constants.CURSEFORGE_FORGIFIED_FABRIC_API_MOD_ID),
+                PackMods.dependencies(curseForge, curseForge, installed(), files, NEOFORGE_CONNECTOR)
+                        .missingCurseForge);
+
+        // without Connector, Fabric API is Fabric API
+        assertEquals(Collections.singleton(Constants.MODRINTH_FABRIC_MOD_ID),
+                PackMods.dependencies(modrinth, modrinth, installed(), files, NEOFORGE_ONLY).missingModrinth);
     }
 
     @Test
