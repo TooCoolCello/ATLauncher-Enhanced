@@ -182,9 +182,8 @@ class SftpUploadTest {
         assertEquals(Collections.singletonList("mods/a.jar"), serverFiles());
     }
 
-    @Test
-    void failedSwapPutsTheBackedUpFileBack() throws IOException {
-        write(server.resolve("mods/a.jar"), "old a");
+    // a server that loses the connection when moving an uploaded file into place
+    SftpUpload.Result runWithFailingSwap(SftpUpload.Existing existing) throws IOException {
         LocalDirSftpClient failing = new LocalDirSftpClient(server) {
             @Override
             public void rename(String from, String to) throws IOException {
@@ -197,9 +196,26 @@ class SftpUploadTest {
         List<SftpUpload.Item> items = SftpUpload.plan(instance, Collections.singletonList(instance.resolve("mods")),
             "/");
         SftpUpload.findExisting(failing, items);
+        return SftpUpload.run(failing, items, existing, "/atlauncher-backups/x", (item, done) -> true);
+    }
 
-        SftpUpload.Result result = SftpUpload.run(failing, items, SftpUpload.Existing.BACK_UP_AND_REPLACE,
-            "/atlauncher-backups/x", (item, done) -> true);
+    @Test
+    void failedSwapPutsTheBackedUpFileBack() throws IOException {
+        write(server.resolve("mods/a.jar"), "old a");
+
+        SftpUpload.Result result = runWithFailingSwap(SftpUpload.Existing.BACK_UP_AND_REPLACE);
+
+        assertNotNull(result.error);
+        assertEquals(0, result.uploaded);
+        assertEquals("old a", read(server.resolve("mods/a.jar")));
+        assertEquals(Collections.singletonList("mods/a.jar"), serverFiles());
+    }
+
+    @Test
+    void failedSwapWithoutBackupKeepsTheOldFile() throws IOException {
+        write(server.resolve("mods/a.jar"), "old a");
+
+        SftpUpload.Result result = runWithFailingSwap(SftpUpload.Existing.REPLACE);
 
         assertNotNull(result.error);
         assertEquals(0, result.uploaded);

@@ -42,12 +42,15 @@ import org.mini2Dx.gettext.GetText;
 /**
  * Uploads files from an instance to the same relative paths below a remote server's folder. Each file is written to a
  * temporary name first and only moved into place once complete, so a cancelled or failed upload never leaves a
- * half-written file where the server would load it. A file it replaces is either removed or moved into a dated backup
- * folder on the server.
+ * half-written file where the server would load it. A file it replaces is moved aside first and put back if the new one
+ * can't go in; once the new one is in place, the old one is either removed or kept in a dated backup folder on the
+ * server.
  */
 public final class SftpUpload {
     // added to a file's name while it's being uploaded
     static final String PARTIAL_SUFFIX = ".atlauncher-part";
+    // added to the name of a file being replaced without a backup, until its replacement is in place
+    static final String OLD_SUFFIX = ".atlauncher-old";
     // below the server's folder, outside mods and config, so nothing loads the backups
     static final String BACKUPS_FOLDER = "atlauncher-backups";
 
@@ -181,7 +184,8 @@ public final class SftpUpload {
             }
 
             String partial = item.remote + PARTIAL_SUFFIX;
-            String backedUpTo = null;
+            // where the server's old copy was moved, until the new one is in place
+            String movedTo = null;
             try {
                 makeFolder(client, folders, SftpClient.parent(item.remote));
                 client.upload(item.local, partial, bytes -> {
@@ -190,35 +194,45 @@ public final class SftpUpload {
                 });
 
                 if (item.exists) {
+                    // the old copy is only moved aside, never deleted, until the new one is in place
+                    String aside = item.remote + OLD_SUFFIX;
                     if (existing == Existing.BACK_UP_AND_REPLACE) {
-                        String backup = SftpClient.join(backupFolder, item.relative);
-                        makeFolder(client, folders, SftpClient.parent(backup));
-                        client.rename(item.remote, backup);
-                        backedUpTo = backup;
+                        aside = SftpClient.join(backupFolder, item.relative);
+                        makeFolder(client, folders, SftpClient.parent(aside));
+                    }
+                    client.rename(item.remote, aside);
+                    movedTo = aside;
+                    if (existing == Existing.BACK_UP_AND_REPLACE) {
                         result.backupFolder = backupFolder;
-                    } else {
-                        client.remove(item.remote);
                     }
                     result.replaced++;
                 }
                 client.rename(partial, item.remote);
                 result.uploaded++;
                 result.bytes += item.size;
-            } catch (InterruptedIOException e) {
-                removeQuietly(client, partial);
-                result.cancelled = true;
-                break;
+                if (movedTo != null && existing == Existing.REPLACE) {
+                    // ponytail: a copy that won't delete stays as clutter next to the new file; nothing is lost
+                    removeQuietly(client, movedTo);
+                }
             } catch (IOException e) {
-                if (backedUpTo != null) {
+                boolean restored = true;
+                if (movedTo != null) {
                     // the new file didn't go in, so put the old one back
                     try {
-                        client.rename(backedUpTo, item.remote);
-                    } catch (IOException ignored) {
-                        // it's still in the backup folder, which the result names
+                        client.rename(movedTo, item.remote);
+                    } catch (IOException notRestored) {
+                        // the old copy is still at movedTo; keep the upload too, so neither is lost
+                        restored = false;
                     }
                 }
-                removeQuietly(client, partial);
-                result.error = e;
+                if (restored) {
+                    removeQuietly(client, partial);
+                }
+                if (e instanceof InterruptedIOException) {
+                    result.cancelled = true;
+                } else {
+                    result.error = e;
+                }
                 break;
             }
         }

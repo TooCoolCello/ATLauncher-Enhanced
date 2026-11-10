@@ -360,7 +360,8 @@ public final class ServerSync {
      */
     static boolean isServerFile(String relative) {
         String lower = relative.toLowerCase(Locale.ENGLISH);
-        return !lower.endsWith("-client.toml") && !lower.endsWith(SftpUpload.PARTIAL_SUFFIX);
+        return !lower.endsWith("-client.toml") && !lower.endsWith(SftpUpload.PARTIAL_SUFFIX)
+            && !lower.endsWith(SftpUpload.OLD_SUFFIX);
     }
 
     /**
