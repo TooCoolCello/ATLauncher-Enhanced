@@ -23,9 +23,7 @@ import java.awt.RenderingHints;
 import java.awt.Window;
 import java.awt.image.BufferedImage;
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -696,10 +694,8 @@ public class Server implements ModManagement {
 
     @Override
     public void save() {
-        // not Files.newOutputStream: on Java 8 an interrupted thread (a stopped install) gets the file emptied
-        try (OutputStreamWriter fileWriter = new OutputStreamWriter(
-            new FileOutputStream(this.getRoot().resolve("server.json").toFile()), StandardCharsets.UTF_8)) {
-            Gsons.DEFAULT.toJson(this, fileWriter);
+        try {
+            FileUtils.writeJsonAtomically(this.getRoot().resolve("server.json"), this);
         } catch (JsonIOException | IOException e) {
             LogManager.logStackTrace(e);
         }

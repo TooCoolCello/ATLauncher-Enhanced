@@ -17,17 +17,49 @@
  */
 package com.atlauncher.utils;
 
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.OutputStreamWriter;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.stream.Stream;
 
 import com.atlauncher.App;
+import com.atlauncher.Gsons;
 import com.atlauncher.managers.LogManager;
 import com.atlauncher.utils.walker.DeleteDirVisitor;
 
 public class FileUtils {
+    /**
+     * Writes an object as JSON beside the file, then moves it over, so a crash or a failed write never leaves the file
+     * half written. FileOutputStream, not Files.newOutputStream: on Java 8 a thread that was interrupted (a stopped
+     * install) gets an NIO stream closed early, which emptied the file.
+     */
+    public static void writeJsonAtomically(Path file, Object value) throws IOException {
+        Path temp = file.resolveSibling(file.getFileName() + ".tmp");
+        try {
+            writeJson(temp, value);
+            try {
+                Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (IOException e) {
+                // such as the file held open by another program on Windows: written in place, as it always was
+                LogManager.warn("Couldn't replace " + file + " in one step (" + e + "), writing it in place");
+                writeJson(file, value);
+            }
+        } finally {
+            Files.deleteIfExists(temp);
+        }
+    }
+
+    private static void writeJson(Path file, Object value) throws IOException {
+        try (OutputStreamWriter writer = new OutputStreamWriter(new FileOutputStream(file.toFile()),
+                StandardCharsets.UTF_8)) {
+            Gsons.DEFAULT.toJson(value, writer);
+        }
+    }
+
     public static boolean delete(Path path) {
         return delete(path, false);
     }
