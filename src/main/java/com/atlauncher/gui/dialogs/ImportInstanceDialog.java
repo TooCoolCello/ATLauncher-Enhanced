@@ -240,6 +240,13 @@ public class ImportInstanceDialog extends JDialog {
             }
         });
         bottom.add(addButton);
+        JButton fromServer = new JButton(GetText.tr("From a Server..."));
+        fromServer.setToolTipText(GetText.tr("Make an instance from a remote server, server folder or server pack"));
+        fromServer.addActionListener(e -> {
+            dispose();
+            ServerImportDialog.open(App.launcher.getParent(), null);
+        });
+        bottom.add(fromServer);
 
         add(middle, BorderLayout.CENTER);
         add(bottom, BorderLayout.SOUTH);
