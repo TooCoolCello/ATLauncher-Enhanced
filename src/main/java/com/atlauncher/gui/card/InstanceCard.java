@@ -61,6 +61,7 @@ import com.atlauncher.gui.dialogs.ManageWorldConfigDefaultsDialog;
 import com.atlauncher.gui.dialogs.ProgressDialog;
 import com.atlauncher.gui.dialogs.RemoteServerUploadDialog;
 import com.atlauncher.gui.dialogs.RemoteServersDialog;
+import com.atlauncher.gui.dialogs.ServerSyncDialog;
 import com.atlauncher.managers.AccountManager;
 import com.atlauncher.managers.ConfigManager;
 import com.atlauncher.managers.DialogManager;
@@ -136,6 +137,7 @@ public class InstanceCard extends CollapsiblePanel {
     private final JMenuItem applyDefaultGameOptionsMenuItem = new JMenuItem(GetText.tr("Apply Default Game Options"));
     private final JMenuItem remoteServerLinkMenuItem = new JMenuItem(GetText.tr("Link Remote Server..."));
     private final JMenuItem uploadToRemoteServerMenuItem = new JMenuItem(GetText.tr("Upload to Remote Server..."));
+    private final JMenuItem syncWithRemoteServerMenuItem = new JMenuItem(GetText.tr("Sync with Server..."));
     // #. {0} is the loader (Forge/Fabric/Quilt)
     private final JMenuItem addFabricMenuItem = new JMenuItem(GetText.tr("Add {0}", "Fabric"));
     // #. {0} is the loader (Forge/Fabric/Quilt)
@@ -352,6 +354,7 @@ public class InstanceCard extends CollapsiblePanel {
         editInstancePopupMenu.add(applyDefaultGameOptionsMenuItem);
         editInstancePopupMenu.add(remoteServerLinkMenuItem);
         editInstancePopupMenu.add(uploadToRemoteServerMenuItem);
+        editInstancePopupMenu.add(syncWithRemoteServerMenuItem);
         editInstancePopupMenu.addSeparator();
 
         if (ConfigManager.getConfigItem("loaders.fabric.enabled", true)
@@ -420,6 +423,10 @@ public class InstanceCard extends CollapsiblePanel {
                 e -> RemoteServersDialog.chooseLink(SwingUtilities.getWindowAncestor(this), instance));
         uploadToRemoteServerMenuItem.addActionListener(
                 e -> RemoteServerUploadDialog.open(SwingUtilities.getWindowAncestor(this), instance));
+        syncWithRemoteServerMenuItem.setToolTipText(GetText.tr("Preview and make the server's mods, configs and "
+                + "KubeJS scripts match this instance"));
+        syncWithRemoteServerMenuItem.addActionListener(
+                e -> ServerSyncDialog.open(SwingUtilities.getWindowAncestor(this), instance));
         // the linked server is looked up each time, as it can be renamed or removed in Remote Servers
         editInstancePopupMenu.addPopupMenuListener(new PopupMenuListener() {
             @Override
@@ -431,6 +438,9 @@ public class InstanceCard extends CollapsiblePanel {
                 // #. {0} is the name of the remote server the instance is linked to
                 uploadToRemoteServerMenuItem.setText(linked == null ? GetText.tr("Upload to Remote Server...")
                         : GetText.tr("Upload to {0}...", linked.name));
+                // #. {0} is the name of the remote server the instance is linked to
+                syncWithRemoteServerMenuItem.setText(linked == null ? GetText.tr("Sync with Server...")
+                        : GetText.tr("Sync with {0}...", linked.name));
             }
 
             @Override
