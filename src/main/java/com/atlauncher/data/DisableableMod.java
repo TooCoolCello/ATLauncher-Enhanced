@@ -298,6 +298,7 @@ public class DisableableMod implements Serializable {
             }
             if (Utils.moveFile(getDisabledFile(instanceOrServer), getFile(instanceOrServer), true)) {
                 this.disabled = false;
+                return true;
             }
         }
         return false;

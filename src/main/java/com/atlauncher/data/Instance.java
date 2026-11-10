@@ -1984,8 +1984,9 @@ public class Instance extends MinecraftVersion implements ModManagement {
 
     @Override
     public void save() {
+        // not Files.newOutputStream: on Java 8 an interrupted thread (a stopped install) gets the file emptied
         try (OutputStreamWriter fileWriter = new OutputStreamWriter(
-            Files.newOutputStream(this.getRoot().resolve("instance.json")), StandardCharsets.UTF_8)) {
+            new FileOutputStream(this.getRoot().resolve("instance.json").toFile()), StandardCharsets.UTF_8)) {
             Gsons.DEFAULT.toJson(this, fileWriter);
         } catch (JsonIOException | IOException e) {
             LogManager.logStackTrace(e);

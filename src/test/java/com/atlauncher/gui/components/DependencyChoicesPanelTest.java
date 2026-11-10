@@ -22,6 +22,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.Window;
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -29,6 +31,7 @@ import java.util.Collections;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import com.atlauncher.data.DependencyChoice.Kind;
 import com.atlauncher.data.DisableableMod;
@@ -46,15 +49,24 @@ import com.atlauncher.gui.dialogs.ProgressDialog;
 
 /**
  * Carrying out the dependency choices after a mod is added: required ones are installed by default, optional ones
- * aren't, a conflicting mod comes out before its replacement goes in, and unmet required ones are warned about.
+ * aren't, a conflicting mod is set aside until its replacement is in, and unmet required ones are warned about.
  */
 public class DependencyChoicesPanelTest {
     // records what the panel asks of the instance, in order
     private static final class Recorder implements ModManagement {
         final List<String> calls = new ArrayList<>();
+        final Path root;
+
+        Recorder() {
+            this(null);
+        }
+
+        Recorder(Path root) {
+            this.root = root;
+        }
 
         public Path getRoot() {
-            return null;
+            return root;
         }
 
         public String getName() {
@@ -115,10 +127,21 @@ public class DependencyChoicesPanelTest {
         return item;
     }
 
-    @Test
-    public void defaultsInstallRequiredOnesAndReplaceAConflictAfterTakingItOut() {
+    // an enabled Fabric API, its jar in the instance's mods folder
+    private static DisableableMod fabricApi(Path root) throws IOException {
         DisableableMod fabricApi = new DisableableMod();
         fabricApi.name = "Fabric API";
+        fabricApi.file = "fabric-api.jar";
+        fabricApi.type = Type.mods;
+        Files.createDirectories(root.resolve("mods"));
+        Files.write(root.resolve("mods/fabric-api.jar"), new byte[] { 1 });
+        return fabricApi;
+    }
+
+    @Test
+    public void defaultsInstallRequiredOnesAndReplaceAConflictOnceItsReplacementIsIn(@TempDir Path root)
+            throws IOException {
+        DisableableMod fabricApi = fabricApi(root);
 
         DependencyChoicesPanel<String> panel = new DependencyChoicesPanel<>();
         panel.show(Arrays.asList(
@@ -128,15 +151,52 @@ public class DependencyChoicesPanelTest {
 
         assertTrue(panel.warnings().isEmpty());
 
-        Recorder instance = new Recorder();
+        Recorder instance = new Recorder(root);
         List<String> problems = panel.apply(instance, null, (item, file) -> {
-            instance.calls.add("install " + file);
+            // set aside by then, so the new file can't clash with it
+            instance.calls.add("install " + file + (Files.exists(root.resolve("mods/fabric-api.jar")) ? "" : " aside"));
             return true;
         });
 
         assertTrue(problems.isEmpty());
-        assertEquals(Arrays.asList("install lib.jar", "remove Fabric API", "install Forgified Fabric API.jar", "save"),
-                instance.calls);
+        assertEquals(Arrays.asList("install lib.jar", "save", "install Forgified Fabric API.jar aside",
+                "remove Fabric API", "save"), instance.calls);
+    }
+
+    @Test
+    public void aConflictIsPutBackWhenItsReplacementFailsToInstall(@TempDir Path root) throws IOException {
+        DisableableMod fabricApi = fabricApi(root);
+
+        DependencyChoicesPanel<String> panel = new DependencyChoicesPanel<>();
+        panel.show(Collections.singletonList(
+                item("Forgified Fabric API", Kind.REQUIRED, State.FABRIC_API_CONFLICT, fabricApi, true)));
+
+        Recorder instance = new Recorder(root);
+        List<String> problems = panel.apply(instance, null, (item, file) -> false);
+
+        assertEquals(1, problems.size());
+        assertFalse(instance.calls.contains("remove Fabric API"));
+        assertFalse(fabricApi.isDisabled());
+        assertTrue(Files.exists(root.resolve("mods/fabric-api.jar")));
+        assertFalse(Files.exists(root.resolve("disabledmods/fabric-api.jar")));
+    }
+
+    @Test
+    public void aDisabledRequiredOneIsEnabledWithoutAProblem(@TempDir Path root) throws IOException {
+        DisableableMod lib = new DisableableMod();
+        lib.name = "lib";
+        lib.file = "lib.jar";
+        lib.type = Type.mods;
+        lib.disabled = true;
+        Files.createDirectories(root.resolve("disabledmods"));
+        Files.write(root.resolve("disabledmods/lib.jar"), new byte[] { 1 });
+
+        DependencyChoicesPanel<String> panel = new DependencyChoicesPanel<>();
+        panel.show(Collections.singletonList(item("lib", Kind.REQUIRED, State.DISABLED, lib, false)));
+
+        assertTrue(panel.apply(new Recorder(root), null, (item, file) -> true).isEmpty());
+        assertFalse(lib.isDisabled());
+        assertTrue(Files.exists(root.resolve("mods/lib.jar")));
     }
 
     @Test

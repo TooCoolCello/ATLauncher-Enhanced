@@ -40,7 +40,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.stream.Collectors;
 
 import javax.swing.BorderFactory;
@@ -171,6 +170,8 @@ public final class PackModsDialog extends JDialog {
     private final ModCompatibility.Target target;
     private final boolean server;
     private PackMods.Installed installed;
+    // the last add's worker
+    private Thread adder;
 
     private final JComboBox<ComboItem<Source>> sourceBox = new JComboBox<>();
     private final JTextField searchField = new JTextField(14);
@@ -981,15 +982,19 @@ public final class PackModsDialog extends JDialog {
         List<String> missing = new ArrayList<>();
     }
 
-    // read for the report while a stopped install may still be finishing its current mod
+    // filled by the worker, and read for the report once it's done
     private static final class Outcome {
-        final List<String> added = new CopyOnWriteArrayList<>();
-        final List<String> skipped = new CopyOnWriteArrayList<>();
-        final List<String> failed = new CopyOnWriteArrayList<>();
+        final List<String> added = new ArrayList<>();
+        final List<String> skipped = new ArrayList<>();
+        final List<String> failed = new ArrayList<>();
     }
 
     private void addSelected() {
-        List<Row> chosen = rows.stream().filter(r -> selected.contains(r.key()) && r.installable())
+        if (adder != null && adder.isAlive()) {
+            // a stopped add is still finishing the mod it's on, and reports when it's done
+            return;
+        }
+        List<Row> chosen =rows.stream().filter(r -> selected.contains(r.key()) && r.installable())
                 .collect(Collectors.toList());
         if (chosen.isEmpty()) {
             return;
@@ -1037,7 +1042,7 @@ public final class PackModsDialog extends JDialog {
         ProgressDialog<Void> adding = new ProgressDialog<>(GetText.tr("Adding Mods"), 0,
                 GetText.tr("Adding Mods"), null, this);
         Outcome outcome = new Outcome();
-        adding.addThread(new Thread(() -> {
+        adder = new Thread(() -> {
             for (int i = 0; i < plan.toAdd.size(); i++) {
                 Row row = plan.toAdd.get(i);
                 if (adding.wasClosed || Thread.currentThread().isInterrupted()) {
@@ -1049,11 +1054,14 @@ public final class PackModsDialog extends JDialog {
                 add(row, plan.files, adding, outcome);
             }
             adding.close();
-        }));
+            // from here, not once the dialog closes: a stop only interrupts this thread, which finishes the mod it's on
+            SwingUtilities.invokeLater(() -> {
+                refreshInstalled();
+                report(outcome, plan.missing);
+            });
+        });
+        adding.addThread(adder);
         adding.start();
-
-        refreshInstalled();
-        report(outcome, plan.missing);
     }
 
     // the CurseForge files to add for these rows that aren't fetched yet, in one request
