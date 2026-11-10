@@ -84,6 +84,21 @@ public class HeapArgumentsTest {
     }
 
     @Test
+    public void maximumHeapInTheJavaParametersDropsTheMinimum() {
+        // the parameters' -Xmx comes later and wins, so a -Xms above it would stop Java starting
+        for (String params : Arrays.asList("-Xmx2G", "-XX:+UseG1GC -Xmx2048M", "-XX:MaxHeapSize=2147483648")) {
+            assertTrue(MCLauncher.setsMaximumHeap(params), params);
+            assertEquals(Collections.singletonList("-Xmx4096M"),
+                    MCLauncher.heapArguments(4096, 4096, 0, SYSTEM_RAM, params), params);
+            assertFalse(MCLauncher.previewHeapArguments(2048, 4096, 0, SYSTEM_RAM, params).initialCapped, params);
+        }
+
+        for (String params : Arrays.asList(null, "", Constants.DEFAULT_JAVA_PARAMETERS, "-Xms1G")) {
+            assertFalse(MCLauncher.setsMaximumHeap(params), String.valueOf(params));
+        }
+    }
+
+    @Test
     public void instanceSettingWinsOverTheLauncherSetting() {
         assertEquals(2048, MCLauncher.resolveInitialMemory(null, 2048));
         assertEquals(1024, MCLauncher.resolveInitialMemory(1024, 2048));
