@@ -78,6 +78,9 @@ dependencies {
     implementation 'com.github.MCRcortex:nekodetector:Version-1.1-pre'
     implementation 'com.twelvemonkeys.imageio:imageio-webp:3.12.0'
 
+    // SFTP for remote servers: maintained JSch fork, BSD/ISC licensed, no dependencies, Java 8 bytecode
+    implementation 'com.github.mwiede:jsch:2.28.8'
+
     // Commons
     implementation 'org.apache.commons:commons-compress:1.27.1'
 
@@ -253,6 +256,8 @@ shadowJar {
         exclude(dependency('com.github.hypfvieh:.*:.*'))
         exclude(dependency('org.apache.commons:commons-compress:.*'))
         exclude(dependency('com.twelvemonkeys.imageio:imageio-webp:.*'))
+        // JSch loads its ciphers, key exchanges and signatures by class name, so minimize can't see them
+        exclude(dependency('com.github.mwiede:jsch:.*'))
     }
 
     // these are included by dbus-java which is only used on Linux
