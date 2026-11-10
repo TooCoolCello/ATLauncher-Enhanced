@@ -105,6 +105,7 @@ public final class AddModsDialog extends JDialog {
     private final JTextField searchField = new JTextField(16);
     // the local collections library, from either provider's tab
     private final JButton collectionsButton = new JButton(GetText.tr("Collections..."));
+    private final JButton fromModpackButton = new JButton(GetText.tr("From Modpack..."));
     private final JLabel platformMessageLabel = new JLabel();
     private final JComboBox<ComboItem<ModPlatform>> hostComboBox = new JComboBox<>();
     private final JComboBox<ComboItem<String>> sectionComboBox = new JComboBox<>();
@@ -264,6 +265,21 @@ public final class AddModsDialog extends JDialog {
                 + "Modrinth collections you've opened or saved"));
         this.collectionsButton.addActionListener(
                 e -> new CollectionsDialog(this, instanceOrServer).setVisible(true));
+        // only where Add Mods has a Mods section
+        LoaderVersion packModsLoader = instanceOrServer.getLoaderVersion();
+        if (packModsLoader != null && !packModsLoader.isPaper() && !packModsLoader.isPurpur()) {
+            searchButtonsPanel.add(Box.createHorizontalStrut(5));
+            searchButtonsPanel.add(this.fromModpackButton);
+            this.fromModpackButton.setToolTipText(GetText.tr("Add mods from someone else's modpack, or another "
+                    + "instance, checked against this one"));
+            this.fromModpackButton.addActionListener(e -> {
+                new PackModsDialog(this, instanceOrServer).setVisible(true);
+                // what was added shows as installed
+                if (rerenderResults != null) {
+                    rerenderResults.run();
+                }
+            });
+        }
 
         this.installFabricApiButton.addActionListener(e -> {
             ModPlatform selectedHost = ((ComboItem<ModPlatform>) hostComboBox.getSelectedItem()).getValue();
