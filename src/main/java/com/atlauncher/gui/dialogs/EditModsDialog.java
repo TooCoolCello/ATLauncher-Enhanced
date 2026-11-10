@@ -142,6 +142,8 @@ public class EditModsDialog extends JDialog {
     private final JLabel updateCheckLabel = new JLabel();
     private final Map<DisableableMod, DisableableMod.UpdateStatus> updateStatuses = new ConcurrentHashMap<>();
     private ExecutorService updateChecker;
+    // whether Sinytra Connector was active when the update statuses were worked out
+    private Boolean connectorActiveForResults;
 
     public EditModsDialog(Instance instance) {
         super(App.launcher.getParent(),
@@ -459,6 +461,16 @@ public class EditModsDialog extends JDialog {
         enabledMods = new ArrayList<>();
         disabledMods = new ArrayList<>();
         boolean canCheckForUpdates = canCheckForUpdates();
+
+        // a Connector install's updates depend on Connector being active, so enabling, disabling or removing it here
+        // checks everything again
+        // ponytail: a check still running across the change may land its old answer; add a generation if that matters
+        boolean connectorActive = instanceOrServer.isForgeLikeAndHasInstalledSinytraConnector();
+        if (connectorActiveForResults != null && connectorActiveForResults != connectorActive) {
+            updateStatuses.values().removeIf(status -> status != DisableableMod.UpdateStatus.CHECKING);
+        }
+        connectorActiveForResults = connectorActive;
+
         for (DisableableMod mod : mods) {
             ModsJCheckBox checkBox = new ModsJCheckBox(mod, this);
             if (canCheckForUpdates) {

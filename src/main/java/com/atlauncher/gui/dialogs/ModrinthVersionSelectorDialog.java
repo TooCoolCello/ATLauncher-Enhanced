@@ -24,7 +24,6 @@ import java.awt.FlowLayout;
 import java.awt.Window;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -91,6 +90,8 @@ public class ModrinthVersionSelectorDialog extends JDialog {
 
     private final DependencyChoicesPanel<ModrinthVersion> dependenciesPanel = new DependencyChoicesPanel<>();
     private final Map<String, DependencyChoicesPanel.Pick<ModrinthVersion>> picks = new ConcurrentHashMap<>();
+    // dependency projects looked up once per dialog, as switching versions and pressing Add run on the UI thread
+    private final Map<String, ModrinthProject> dependencyProjects = new ConcurrentHashMap<>();
     private JScrollPane scrollPane;
     private JButton addButton;
     private JButton viewModButton;
@@ -336,12 +337,14 @@ public class ModrinthVersionSelectorDialog extends JDialog {
             .map(d -> connectorActive && Constants.MODRINTH_FABRIC_MOD_ID.equals(d.projectId)
                 ? Constants.MODRINTH_FORGIFIED_FABRIC_API_MOD_ID
                 : d.projectId)
-            .distinct().toArray(String[]::new);
-        Map<String, ModrinthProject> projects = projectIds.length == 0 ? null
-            : ModrinthApi.getProjectsAsMap(projectIds);
-        if (projects == null) {
-            projects = new HashMap<>();
+            .distinct().filter(id -> !dependencyProjects.containsKey(id)).toArray(String[]::new);
+        if (projectIds.length != 0) {
+            Map<String, ModrinthProject> found = ModrinthApi.getProjectsAsMap(projectIds);
+            if (found != null) {
+                dependencyProjects.putAll(found);
+            }
         }
+        Map<String, ModrinthProject> projects = dependencyProjects;
 
         for (ModrinthDependency dependency : version.dependencies) {
             DependencyChoice.Kind kind = DependencyChoice.kindOf(dependency.dependencyType);
@@ -826,7 +829,10 @@ public class ModrinthVersionSelectorDialog extends JDialog {
         viewFileButton.addActionListener(e -> {
             ModrinthVersion version = (ModrinthVersion) versionsDropdown.getSelectedItem();
 
-            OS.openWebBrowser(String.format("https://modrinth.com/mod/%s/version/%s", project.slug, version.id));
+            // nothing is selected when a dependency's declared version isn't listed
+            if (version != null) {
+                OS.openWebBrowser(String.format("https://modrinth.com/mod/%s/version/%s", project.slug, version.id));
+            }
         });
 
         versionsDropdown.addActionListener(e -> {
