@@ -58,7 +58,7 @@ below, and none is merged into `master` yet.
 | Safe dialog recovery | `feature/recover-ui` | `managers/DialogManager.java`, `gui/TrayMenu.java` |
 | Edit Mods live search | `feature/edit-mods-search` | `gui/dialogs/EditModsDialog.java` |
 | Add Mods page size 25/50/100/200 | *(commit `a38cedd3`; no dedicated branch, pushed as part of `feature/add-mods-list-view` and later)* | `gui/dialogs/AddModsPagination.java`, `data/Settings.java`, `CurseForgeApi.java`, `ModrinthApi.java` |
-| Add Mods Cards / List results | `feature/add-mods-list-view` | `data/AddModsViewMode.java`, `gui/card/CompactResultRow.java`, `gui/card/*Card.java` |
+| Add Mods Cards / List results | `feature/add-mods-list-view` | `data/AddModsViewMode.java`, `gui/card/ResultRow.java`, `gui/card/*Card.java` |
 | Invalid remote-image-cache handling | `fix/remote-image-cache-empty-url` | `workers/BackgroundImageWorker.java` |
 | Loader indicators (official NeoForge/Quilt art, with fallbacks) | `feature/add-mods-loader-icons` | `data/LoaderIndicators.java`, `gui/card/LoaderIndicatorStrip.java`, `src/main/resources/assets/image/loader/` (see `ATTRIBUTION.md`) |
 
@@ -83,9 +83,11 @@ Tests for these are under `src/test/java/com/atlauncher/` (same package as each 
 | Zip extraction refuses entries that leave the target folder | every zip import | `utils/ArchiveUtils.java` |
 | Sinytra-aware updates: a mod keeps its installed loader path (native or Fabric via Connector) | Edit Mods update arrows, Check For Updates | `data/DisableableMod.java`, `data/SinytraConnector.java`; test `SinytraModUpdateTest` |
 | Minimum Java heap (`-Xms`), separate from maximum, with a linked range slider | Settings > Java/Minecraft; instance Settings | `gui/components/MemoryRangeSlider.java`, `gui/components/HeapFlagsPreview.java`, `InstanceLauncher.initialMemory` |
-| Generate a pack's `defaultconfigs` from a world's configs, and manage the current ones | Instance card > Manage World Config Defaults... (Forge/NeoForge) | `utils/DefaultConfigsFromWorld.java`, `gui/dialogs/ManageWorldConfigDefaultsDialog.java`, `gui/dialogs/WorldConfigDefaultsDialogs.java` |
+| Generate a pack's `defaultconfigs` from a world's configs, and manage the current ones | Edit Instance > Manage World Config Defaults... (Forge/NeoForge 1.14+ releases only) | `utils/DefaultConfigsFromWorld.java`, `gui/dialogs/ManageWorldConfigDefaultsDialog.java`, `gui/dialogs/WorldConfigDefaultsDialogs.java` |
 
 ## 2b. Committed on a fork branch
+
+Both items below are also merged into `consolidated`.
 
 For whether a branch is on `origin`, check `git branch -r --contains <commit>`.
 This file doesn't record push status because it goes stale.
@@ -186,6 +188,17 @@ except remembering SFTP passwords, which is now an opt-in (below). Known follow-
 - Fix base ATLauncher deleting the old jar before a same-project update downloads (`Instance`/`Server`
   `addFileFromModrinth`/`addFileFromCurseForge`): after the user has tested this build.
 - Sync/Import pair jars by name, size and hash, not by the mod IDs inside jars (`mods.toml`, `fabric.mod.json`).
+- Bug pass (2026-11-10): five area reviews plus fixes, each with a test where it can run without network
+  (576+ tests). Known and left:
+  - SFTP: JSch treats `*`, `?` and `\` in remote names as wildcards/escapes, so such server files can fail to
+    download; a `[ipv6]:port` host isn't split; keyboard-interactive-only servers fail password login.
+  - From Modpack: closing it doesn't stop a pack download already running; stopping a bulk add can show base
+    ATLauncher's "Failed to download" dialog for the mod in progress.
+  - Dependencies: one level deep only; two libraries needing each other are never offered as unneeded; a Modrinth
+    dependency that names only a version always warns.
+  - Version selectors update their UI from their loading thread (upstream pattern).
+  - Recover UI is in the tray menu only ("Kill Open Dialogs").
+  - A project its site has deleted stays in a collection with no card to remove it by.
 
 ## 5. Needs source verification
 
