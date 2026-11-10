@@ -83,6 +83,8 @@ public class Settings {
     public int selectedTabOnStartup = 0;
     public String customDownloadsPath = null;
     public Boolean showPackNameAndVersion = null;
+    // packs browser; false when missing, so a settings file saved without it never hides packs by itself
+    public boolean hideIncompatiblePacks = false;
     public boolean keepLauncherOpen = true;
     public boolean enableConsole = true;
     public boolean enableTrayMenu = true;

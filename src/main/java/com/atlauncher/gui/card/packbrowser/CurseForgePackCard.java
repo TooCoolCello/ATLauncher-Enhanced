@@ -35,6 +35,7 @@ import org.mini2Dx.gettext.GetText;
 import com.atlauncher.App;
 import com.atlauncher.builders.HTMLBuilder;
 import com.atlauncher.constants.UIConstants;
+import com.atlauncher.data.PackCompatibility;
 import com.atlauncher.data.curseforge.CurseForgeAttachment;
 import com.atlauncher.data.curseforge.CurseForgeProject;
 import com.atlauncher.evnt.listener.RelocalizationListener;
@@ -146,6 +147,7 @@ public class CurseForgePackCard extends JPanel implements RelocalizationListener
         actionsPanel.setPreferredSize(new Dimension(actionsPanel.getPreferredSize().width, 155));
 
         add(splitter, BorderLayout.CENTER);
+        IncompatiblePackFlag.apply(this, PackCompatibility.curseForge(project));
     }
 
     @Override
