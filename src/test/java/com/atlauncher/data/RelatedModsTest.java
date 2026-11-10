@@ -23,12 +23,16 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
+import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.Test;
 
 import com.atlauncher.constants.Constants;
+import com.atlauncher.data.curseforge.CurseForgeAuthor;
 import com.atlauncher.data.curseforge.CurseForgeFile;
 import com.atlauncher.data.curseforge.CurseForgeFileDependency;
+import com.atlauncher.data.curseforge.CurseForgeProject;
 import com.atlauncher.data.minecraft.loaders.LoaderVersion;
 import com.atlauncher.data.modrinth.ModrinthDependency;
 import com.atlauncher.data.modrinth.ModrinthDependencyType;
@@ -101,6 +105,29 @@ public class RelatedModsTest {
         RelatedMods.Needs<Integer> cf = RelatedMods.curseForgeNeeds(file, 9);
         assertEquals(Collections.singletonList(2), cf.required);
         assertEquals(Collections.singletonList(1), cf.optional);
+    }
+
+    private static CurseForgeProject project(int id, Integer authorId) {
+        CurseForgeProject project = new CurseForgeProject();
+        project.id = id;
+        if (authorId != null) {
+            CurseForgeAuthor author = new CurseForgeAuthor();
+            author.id = authorId;
+            project.authors = Collections.singletonList(author);
+        }
+        return project;
+    }
+
+    @Test
+    public void sameAuthorKeepsOnlyTheAuthorsProjects() {
+        // CurseForge's search answers with the author's projects, or, if it ignored the author filter, everyone's
+        List<CurseForgeProject> filtered = Arrays.asList(project(1, 7), project(2, 7));
+        List<CurseForgeProject> unfiltered = Arrays.asList(project(3, 8), project(4, 7), project(5, null), null);
+
+        assertEquals(Arrays.asList(1, 2), RelatedMods.byCurseForgeAuthor(filtered, 7).stream().map(p -> p.id)
+                .collect(Collectors.toList()));
+        assertEquals(Collections.singletonList(4), RelatedMods.byCurseForgeAuthor(unfiltered, 7).stream()
+                .map(p -> p.id).collect(Collectors.toList()));
     }
 
     @Test

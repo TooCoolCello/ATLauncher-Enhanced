@@ -67,6 +67,7 @@ import com.atlauncher.data.modrinth.ModrinthProject;
 import com.atlauncher.data.modrinth.ModrinthProjectType;
 import com.atlauncher.data.modrinth.ModrinthSearchHit;
 import com.atlauncher.data.modrinth.ModrinthSearchResult;
+import com.atlauncher.gui.components.WrappingLabel;
 import com.atlauncher.managers.LogManager;
 import com.atlauncher.utils.CollectionsLibrary;
 import com.atlauncher.utils.CurseForgeApi;
@@ -137,8 +138,9 @@ public final class RelatedModsDialog extends JDialog {
         setSize(900, 600);
         setLocationRelativeTo(parent);
 
-        JLabel about = new JLabel(GetText.tr("Neither Modrinth nor CurseForge lists similar projects, so these are "
-                + "found from what they do say. Each tab says how its list was made."));
+        WrappingLabel about = new WrappingLabel();
+        about.setWrappedText(escape(GetText.tr("Neither Modrinth nor CurseForge lists similar projects, so these are "
+                + "found from what they do say. Each tab says how its list was made.")));
         about.setEnabled(false);
 
         JButton close = new JButton(GetText.tr("Close"));
@@ -164,7 +166,8 @@ public final class RelatedModsDialog extends JDialog {
     private final class Section {
         final int index;
         final String title;
-        final JLabel note = new JLabel();
+        // wraps to the tab's width: a fixed 760px one was cut off at the dialog's 640px minimum
+        final WrappingLabel note = new WrappingLabel();
         final JPanel results = new JPanel();
         final JLabel message = new JLabel("", SwingConstants.CENTER);
         final CardLayout cards = new CardLayout();
@@ -190,7 +193,7 @@ public final class RelatedModsDialog extends JDialog {
         }
 
         void note(String text) {
-            note.setText("<html><div style='width:760px'>" + escape(text) + "</div></html>");
+            note.setWrappedText(escape(text));
         }
 
         void say(String text) {
@@ -284,9 +287,14 @@ public final class RelatedModsDialog extends JDialog {
         });
 
         needs.load(() -> {
-            com.atlauncher.data.modrinth.ModrinthVersion version = RelatedMods.versionForDependencies(
-                    paced(() -> ModrinthApi.getVersionsForLoaders(hit.projectId,
-                            RelatedMods.minecraftVersion(target), RelatedMods.versionLoaders(target))),
+            List<com.atlauncher.data.modrinth.ModrinthVersion> versions = paced(() -> ModrinthApi
+                    .getVersionsForLoaders(hit.projectId, RelatedMods.minecraftVersion(target),
+                            RelatedMods.versionLoaders(target)));
+            // a failed request isn't proof there's no file here
+            if (versions == null) {
+                return () -> needs.say(GetText.tr("Modrinth couldn't be reached. Try again later."));
+            }
+            com.atlauncher.data.modrinth.ModrinthVersion version = RelatedMods.versionForDependencies(versions,
                     target);
             if (version == null) {
                 return () -> needs.say(noFileMessage());
@@ -341,7 +349,7 @@ public final class RelatedModsDialog extends JDialog {
             if (projects == null) {
                 return () -> author.say(GetText.tr("CurseForge couldn't be reached. Try again later."));
             }
-            List<CurseForgeProject> others = without(projects, project.id);
+            List<CurseForgeProject> others = without(RelatedMods.byCurseForgeAuthor(projects, who.id), project.id);
             return () -> {
                 // #. {0} is a CurseForge author's name
                 author.note(GetText.tr("{0}'s most popular mods on CurseForge.", who.name));

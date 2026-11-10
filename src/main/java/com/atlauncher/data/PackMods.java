@@ -45,6 +45,7 @@ import com.atlauncher.data.curseforge.CurseForgeGameVersionLatestFiles;
 import com.atlauncher.data.curseforge.CurseForgeProject;
 import com.atlauncher.data.curseforge.pack.CurseForgeManifest;
 import com.atlauncher.data.curseforge.pack.CurseForgeManifestFile;
+import com.atlauncher.data.minecraft.loaders.LoaderVersion;
 import com.atlauncher.data.modrinth.ModrinthDependency;
 import com.atlauncher.data.modrinth.ModrinthDependencyType;
 import com.atlauncher.data.modrinth.ModrinthProject;
@@ -183,6 +184,8 @@ public final class PackMods {
         final Set<String> modrinth = new HashSet<>();
         final Set<Integer> curseForge = new HashSet<>();
         final Set<String> names = new HashSet<>();
+        // for the equivalents the selectors accept for a dependency, such as a library added from the other site
+        final List<DisableableMod> mods = new ArrayList<>();
 
         public static Installed of(Collection<DisableableMod> mods) {
             Installed installed = new Installed();
@@ -191,6 +194,7 @@ public final class PackMods {
                     if (mod == null) {
                         continue;
                     }
+                    installed.mods.add(mod);
                     // a mod added from either site is usually looked up on the other too
                     if (mod.isFromModrinth()) {
                         installed.modrinth.add(mod.modrinthProject.id.toLowerCase(Locale.ENGLISH));
@@ -224,6 +228,16 @@ public final class PackMods {
 
         boolean hasCurseForge(Integer id) {
             return id != null && curseForge.contains(id);
+        }
+
+        // a dependency counted as here as the selectors count it
+        boolean providesModrinth(String id) {
+            return hasModrinth(id) || mods.stream().anyMatch(m -> RequiredDependency.providesModrinth(m, id));
+        }
+
+        boolean providesCurseForge(int id, LoaderVersion loader) {
+            return hasCurseForge(id)
+                    || mods.stream().anyMatch(m -> RequiredDependency.providesCurseForgeAsEquivalent(m, id, loader));
         }
 
         public boolean has(Row row) {
@@ -845,7 +859,7 @@ public final class PackMods {
      * @param curseForgeFiles the CurseForge files to be added, by file ID
      */
     public static Dependencies dependencies(List<Row> selected, List<Row> all, Installed installed,
-            Map<Integer, CurseForgeFile> curseForgeFiles) {
+            Map<Integer, CurseForgeFile> curseForgeFiles, ModCompatibility.Target target) {
         Map<String, Row> byModrinth = new HashMap<>();
         Map<Integer, Row> byCurseForge = new HashMap<>();
         for (Row row : all) {
@@ -866,9 +880,13 @@ public final class PackMods {
 
         for (int i = 0; i < queue.size(); i++) {
             Row row = queue.get(i);
-            for (String id : requiredModrinth(row)) {
+            for (String required : requiredModrinth(row)) {
+                // Connector takes Forgified Fabric API for Fabric API, as the selectors do
+                String id = target.connectorActive && Constants.MODRINTH_FABRIC_MOD_ID.equals(required)
+                        ? Constants.MODRINTH_FORGIFIED_FABRIC_API_MOD_ID
+                        : required;
                 Row dependency = byModrinth.get(id.toLowerCase(Locale.ENGLISH));
-                if (installed.hasModrinth(id) || (dependency != null && covered.contains(dependency.key()))) {
+                if (installed.providesModrinth(id) || (dependency != null && covered.contains(dependency.key()))) {
                     continue;
                 }
                 if (dependency != null && dependency.status != Status.INSTALLED && dependency.installable()) {
@@ -879,9 +897,13 @@ public final class PackMods {
                     missingModrinth.add(id);
                 }
             }
-            for (Integer id : requiredCurseForge(row, curseForgeFiles)) {
+            for (Integer required : requiredCurseForge(row, curseForgeFiles)) {
+                Integer id = target.connectorActive && required == Constants.CURSEFORGE_FABRIC_MOD_ID
+                        ? Integer.valueOf(Constants.CURSEFORGE_FORGIFIED_FABRIC_API_MOD_ID)
+                        : required;
                 Row dependency = byCurseForge.get(id);
-                if (installed.hasCurseForge(id) || (dependency != null && covered.contains(dependency.key()))) {
+                if (installed.providesCurseForge(id, target.loader)
+                        || (dependency != null && covered.contains(dependency.key()))) {
                     continue;
                 }
                 if (dependency != null && dependency.status != Status.INSTALLED && dependency.installable()) {

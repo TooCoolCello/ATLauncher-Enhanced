@@ -100,6 +100,7 @@ import com.atlauncher.data.modrinth.ModrinthSearchResult;
 import com.atlauncher.data.modrinth.ModrinthVersion;
 import com.atlauncher.data.modrinth.pack.ModrinthModpackManifest;
 import com.atlauncher.gui.card.CompatibilityBadge;
+import com.atlauncher.gui.components.WrappingLabel;
 import com.atlauncher.managers.DialogManager;
 import com.atlauncher.managers.InstanceManager;
 import com.atlauncher.managers.LogManager;
@@ -194,7 +195,8 @@ public final class PackModsDialog extends JDialog {
     private final JButton selectNone = new JButton(GetText.tr("Select None"));
     private final RowsModel model = new RowsModel();
     private final JTable table = new JTable(model);
-    private final JLabel summary = new JLabel();
+    // wraps to the panel's width, which is narrower than a fixed width at the dialog's smallest size
+    private final WrappingLabel summary = new WrappingLabel();
     private final JLabel modsMessage = new JLabel("", SwingConstants.CENTER);
     private final CardLayout modsCards = new CardLayout();
     private final JPanel modsArea = new JPanel(modsCards);
@@ -371,6 +373,10 @@ public final class PackModsDialog extends JDialog {
                 }
                 showPacks(search, found, GetText.tr("No modpacks found."));
             });
+        }, () -> {
+            if (search == searchGeneration) {
+                showPackMessage(GetText.tr("The search couldn't be done. Try again later."));
+            }
         });
     }
 
@@ -424,6 +430,10 @@ public final class PackModsDialog extends JDialog {
                 showPacks(search, Collections.singletonList(found), "");
                 packList.setSelectedIndex(0);
             });
+        }, () -> {
+            if (search == searchGeneration) {
+                showPackMessage(GetText.tr("That modpack couldn't be found, or the site couldn't be reached."));
+            }
         });
     }
 
@@ -447,7 +457,7 @@ public final class PackModsDialog extends JDialog {
             Instance from = pack.instance;
             showModsMessage(GetText.tr("Checking its mods..."));
             background("PackModsInstance", () -> resolveAndShow(load,
-                    PackMods.fromInstanceMods(mods, mod -> sha1Of(mod, from))));
+                    PackMods.fromInstanceMods(mods, mod -> sha1Of(mod, from))), () -> readFailed(load));
             return;
         }
 
@@ -491,7 +501,7 @@ public final class PackModsDialog extends JDialog {
                 versionLabel.setVisible(true);
                 loadVersion();
             });
-        });
+        }, () -> readFailed(load));
     }
 
     // a version's name with the first few game versions it's for, short enough for the dropdown
@@ -568,15 +578,17 @@ public final class PackModsDialog extends JDialog {
             }
 
             if (files == null) {
-                SwingUtilities.invokeLater(() -> {
-                    if (load == loadGeneration) {
-                        showModsMessage(GetText.tr("The pack's mod list couldn't be read. Try again later."));
-                    }
-                });
+                SwingUtilities.invokeLater(() -> readFailed(load));
                 return;
             }
             resolveAndShow(load, files);
-        });
+        }, () -> readFailed(load));
+    }
+
+    private void readFailed(int load) {
+        if (load == loadGeneration) {
+            showModsMessage(GetText.tr("The pack's mod list couldn't be read. Try again later."));
+        }
     }
 
     // downloads the pack's file to the launcher's temp folder, reads one entry and deletes it again
@@ -950,8 +962,7 @@ public final class PackModsDialog extends JDialog {
         if (result.problem != null) {
             text += " " + result.problem;
         }
-        // a set width, so the text wraps instead of widening the window
-        summary.setText("<html><div style='width:600px'>" + escape(text) + "</div></html>");
+        summary.setWrappedText(escape(text));
     }
 
     private void updateButtons() {
@@ -1015,7 +1026,7 @@ public final class PackModsDialog extends JDialog {
                     known.addAll(needs.alsoAdd);
                 }
                 fetchFiles(known, plan.files);
-                needs = PackMods.dependencies(chosen, all, now, plan.files);
+                needs = PackMods.dependencies(chosen, all, now, plan.files, target);
                 if (needs.alsoAdd.stream().allMatch(r -> r.platform != ModPlatform.CURSEFORGE
                         || plan.files.containsKey(r.curseForgeFileId))) {
                     break;
@@ -1049,8 +1060,10 @@ public final class PackModsDialog extends JDialog {
                     outcome.skipped.add(GetText.tr("{0}: stopped before it was added", row.name));
                     continue;
                 }
-                // #. {0} is a mod's name, {1} and {2} how far through the list it is
-                adding.setLabel(GetText.tr("Adding {0} ({1} of {2})", row.name, i + 1, plan.toAdd.size()));
+                // the count first, as the narrow progress dialog cuts a long name off at its end
+                // #. {0} and {1} are how far through the list it is, {2} a mod's name
+                String label = GetText.tr("Adding {0} of {1}: {2}", i + 1, plan.toAdd.size(), row.name);
+                SwingUtilities.invokeLater(() -> adding.setLabel(label));
                 add(row, plan.files, adding, outcome);
             }
             adding.close();
@@ -1106,11 +1119,11 @@ public final class PackModsDialog extends JDialog {
                 plan.toAdd.size(), instanceOrServer.getName()));
         if (!plan.alsoAdd.isEmpty()) {
             lines.add(GetText.tr("This includes mods they require that weren't ticked: {0}.",
-                    plan.alsoAdd.stream().map(r -> r.name).collect(Collectors.joining(", "))));
+                    listed(plan.alsoAdd.stream().map(r -> r.name).collect(Collectors.toList()), ", ")));
         }
         if (!plan.missing.isEmpty()) {
             lines.add(GetText.tr("They also require mods this pack can't add here, so add these yourself from Add "
-                    + "Mods: {0}.", String.join(", ", plan.missing)));
+                    + "Mods: {0}.", listed(plan.missing, ", ")));
         }
         long connector = plan.toAdd.stream().filter(r -> r.status == Status.VIA_CONNECTOR).count();
         if (connector > 0) {
@@ -1165,17 +1178,21 @@ public final class PackModsDialog extends JDialog {
     }
 
     private void report(Outcome outcome, List<String> missing) {
+        // the dialog only lists some of each, so the whole outcome goes to the log
+        LogManager.info("Added from a pack: " + String.join(", ", outcome.added) + ". Skipped: "
+                + String.join("; ", outcome.skipped) + ". Failed: " + String.join("; ", outcome.failed)
+                + ". Still needed: " + String.join(", ", missing));
         List<String> lines = new ArrayList<>();
         lines.add(GetText.tr("Added {0}: {1}", outcome.added.size(),
-                outcome.added.isEmpty() ? GetText.tr("none") : String.join(", ", outcome.added)));
+                outcome.added.isEmpty() ? GetText.tr("none") : listed(outcome.added, ", ")));
         if (!outcome.skipped.isEmpty()) {
-            lines.add(GetText.tr("Skipped {0}: {1}", outcome.skipped.size(), String.join("; ", outcome.skipped)));
+            lines.add(GetText.tr("Skipped {0}: {1}", outcome.skipped.size(), listed(outcome.skipped, "; ")));
         }
         if (!outcome.failed.isEmpty()) {
-            lines.add(GetText.tr("Failed {0}: {1}", outcome.failed.size(), String.join("; ", outcome.failed)));
+            lines.add(GetText.tr("Failed {0}: {1}", outcome.failed.size(), listed(outcome.failed, "; ")));
         }
         if (!missing.isEmpty()) {
-            lines.add(GetText.tr("Still needed, from Add Mods: {0}", String.join(", ", missing)));
+            lines.add(GetText.tr("Still needed, from Add Mods: {0}", listed(missing, ", ")));
         }
 
         DialogManager.okDialog().setParent(this).setTitle(GetText.tr("Add Mods From A Modpack"))
@@ -1194,12 +1211,26 @@ public final class PackModsDialog extends JDialog {
 
     // --- helpers
 
-    private static void background(String name, Runnable work) {
+    // at most this many names in a message, so a big add's dialog still fits on the screen
+    private static final int NAMES_LISTED = 20;
+
+    static String listed(List<String> names, String separator) {
+        if (names.size() <= NAMES_LISTED) {
+            return String.join(separator, names);
+        }
+        // #. {0} is how many more names there are than are listed
+        return String.join(separator, names.subList(0, NAMES_LISTED)) + separator
+                + GetText.tr("and {0} more", names.size() - NAMES_LISTED);
+    }
+
+    // failed runs on the event dispatch thread when the work throws, so its message replaces the one saying it's busy
+    private static void background(String name, Runnable work, Runnable failed) {
         Thread thread = new Thread(() -> {
             try {
                 work.run();
             } catch (RuntimeException e) {
                 LogManager.logStackTrace("Pack mods: " + name + " failed", e);
+                SwingUtilities.invokeLater(failed);
             }
         }, name);
         thread.setDaemon(true);
