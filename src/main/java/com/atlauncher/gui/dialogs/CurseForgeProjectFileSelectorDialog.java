@@ -23,10 +23,10 @@ import java.awt.FlowLayout;
 import java.awt.Window;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -80,6 +80,9 @@ public class CurseForgeProjectFileSelectorDialog extends JDialog {
     private boolean reinstall = false;
 
     private final DependencyChoicesPanel<CurseForgeFile> dependenciesPanel = new DependencyChoicesPanel<>();
+    // dependency projects looked up once per dialog: switching files and pressing Add run on the UI thread, and the
+    // lookup is an uncached POST
+    private final Map<Integer, CurseForgeProject> dependencyProjects = new ConcurrentHashMap<>();
     private JScrollPane scrollPane;
     private JButton addButton;
     private JButton viewModButton;
@@ -502,11 +505,14 @@ public class CurseForgeProjectFileSelectorDialog extends JDialog {
             .mapToInt(d -> connectorActive && d.modId == Constants.CURSEFORGE_FABRIC_MOD_ID
                 ? Constants.CURSEFORGE_FORGIFIED_FABRIC_API_MOD_ID
                 : d.modId)
-            .distinct().toArray();
-        Map<Integer, CurseForgeProject> projects = CurseForgeApi.getProjectsAsMap(projectIds);
-        if (projects == null) {
-            projects = new HashMap<>();
+            .distinct().filter(id -> !dependencyProjects.containsKey(id)).toArray();
+        if (projectIds.length != 0) {
+            Map<Integer, CurseForgeProject> found = CurseForgeApi.getProjectsAsMap(projectIds);
+            if (found != null) {
+                dependencyProjects.putAll(found);
+            }
         }
+        Map<Integer, CurseForgeProject> projects = dependencyProjects;
 
         for (CurseForgeFileDependency dependency : file.dependencies) {
             DependencyChoice.Kind kind = DependencyChoice.kindOf(dependency);
@@ -715,7 +721,9 @@ public class CurseForgeProjectFileSelectorDialog extends JDialog {
             // loaders would need its own migration action
             if (modsSection && installedFileId == null && updateCandidate == null) {
                 instanceOrServer.getMods().stream()
-                    .filter(m -> m.isFromCurseForge() && m.getCurseForgeModId() == mod.id).findFirst()
+                    // an unselected optional mod or skipped download was never put on disk, so it isn't installed
+                    .filter(m -> m.isFromCurseForge() && m.getCurseForgeModId() == mod.id
+                        && RequiredDependency.isPresent(m)).findFirst()
                     .ifPresent(installed -> {
                         updateCandidate = installed.curseForgeUpdateCandidate(instanceOrServer, projectFiles,
                             neoForgeForgeCompatabilityVersions);
