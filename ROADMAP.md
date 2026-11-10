@@ -172,7 +172,8 @@ Build note: Gradle 8.12.1 can't run on Java 25. Use JDK 17, for example
 ## 4. Planned
 
 Phases A–F are built (section 2, "On `consolidated`"). The user accepted the defaults on 2026-11-10,
-except remembering SFTP passwords, which is now an opt-in (below). Known follow-ups:
+except remembering SFTP passwords, which is an opt-in on Windows only (DPAPI). The user chose that over
+a master-password store for Mac and Linux. Known follow-ups:
 
 - Hand-test every feature in section 2's `consolidated` table; none has been clicked through yet.
 - Paper/Purpur servers: Sync and Import report their loader as unknown. Later goal: support them, with a
