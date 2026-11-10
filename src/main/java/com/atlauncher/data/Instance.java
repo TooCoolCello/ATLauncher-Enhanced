@@ -121,7 +121,6 @@ import com.atlauncher.data.modrinth.ModrinthFile;
 import com.atlauncher.data.modrinth.ModrinthDownloadMetadata;
 import com.atlauncher.data.modrinth.ModrinthProject;
 import com.atlauncher.data.modrinth.ModrinthProjectType;
-import com.atlauncher.data.modrinth.ModrinthSide;
 import com.atlauncher.data.modrinth.ModrinthVersion;
 import com.atlauncher.data.modrinth.pack.ModrinthModpackFile;
 import com.atlauncher.data.modrinth.pack.ModrinthModpackManifest;
@@ -1863,15 +1862,8 @@ public class Instance extends MinecraftVersion implements ModManagement {
                             file.hashes.put("sha1", sha1Hash);
                             file.hashes.put("sha512", Hashing.sha512(modPath).toString());
 
-                            file.env = new HashMap<>();
-                            // mods are always required on the client ALWAYS ALWAYS ALWAYS (for now)
-                            file.env.put("client", "required");
-                            file.env.put("server", "required");
-
-                            if (mod.modrinthProject != null
-                                && mod.modrinthProject.serverSide == ModrinthSide.UNSUPPORTED) {
-                                file.env.put("server", "unsupported");
-                            }
+                            // from the side set in Edit Mods, else Modrinth's (as before) or CurseForge's data
+                            file.env = ModSide.modrinthEnv(mod.getEffectiveSide());
 
                             file.fileSize = modPath.toFile().length();
 
@@ -3418,6 +3410,9 @@ public class Instance extends MinecraftVersion implements ModManagement {
             }
         }
 
+        // an update replaces the entry below, so keep a side set by hand
+        ModSide manualSide = DisableableMod.manualSideOf(this.launcher.mods, mod.id, null);
+
         // remove any mods that are from the same mod on CurseForge from the master mod
         // list
         this.launcher.mods = this.launcher.mods.stream()
@@ -3426,6 +3421,7 @@ public class Instance extends MinecraftVersion implements ModManagement {
 
         DisableableMod dm = new DisableableMod(mod.name, file.displayName, true, file.fileName,
             getTypeFromCurseForgeMod(mod), null, mod.summary, false, true, true, false, mod, file);
+        dm.side = manualSide;
 
         // check for mod on Modrinth
         if (!App.settings.dontCheckModsOnModrinth) {
@@ -3541,6 +3537,9 @@ public class Instance extends MinecraftVersion implements ModManagement {
             download.copy();
         }
 
+        // an update replaces the entry below, so keep a side set by hand
+        ModSide manualSide = DisableableMod.manualSideOf(this.launcher.mods, null, mod.id);
+
         // remove any mods that are from the same mod from the master mod list
         this.launcher.mods = this.launcher.mods.stream().filter(
                 installedMod -> !installedMod.isFromModrinth()
@@ -3549,6 +3548,7 @@ public class Instance extends MinecraftVersion implements ModManagement {
 
         DisableableMod dm = new DisableableMod(mod.title, version.name, true, fileToDownload.filename, modType,
             null, mod.description, false, true, true, false, mod, version);
+        dm.side = manualSide;
 
         // check for mod on CurseForge
         if (!App.settings.dontCheckModsOnCurseForge) {

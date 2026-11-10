@@ -18,14 +18,24 @@
 package com.atlauncher.gui.components;
 
 import java.awt.Component;
+import java.awt.Dimension;
+import java.awt.Font;
+import java.awt.FontMetrics;
 import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.util.ArrayList;
+import java.util.List;
 
+import javax.swing.ButtonGroup;
 import javax.swing.Icon;
 import javax.swing.JCheckBox;
+import javax.swing.JMenu;
 import javax.swing.JMenuItem;
 import javax.swing.JPopupMenu;
+import javax.swing.JRadioButtonMenuItem;
 import javax.swing.JToolTip;
 import javax.swing.UIManager;
 
@@ -34,6 +44,7 @@ import org.mini2Dx.gettext.GetText;
 import com.atlauncher.builders.HTMLBuilder;
 import com.atlauncher.data.DisableableMod;
 import com.atlauncher.data.ModPlatform;
+import com.atlauncher.data.ModSide;
 import com.atlauncher.data.Type;
 import com.atlauncher.data.curseforge.CurseForgeProject;
 import com.atlauncher.data.curseforge.CurseForgeSocialLinkType;
@@ -58,6 +69,7 @@ import com.formdev.flatlaf.util.UIScale;
  */
 public class ModsJCheckBox extends JCheckBox {
     private static final Icon UPDATE_ICON = new FlatSVGIcon("assets/icon/update.svg", 14, 14);
+    private static final int TAG_GAP = 6, TAG_PADDING = 4;
 
     private DisableableMod.UpdateStatus updateStatus;
 
@@ -110,9 +122,7 @@ public class ModsJCheckBox extends JCheckBox {
         this.mod = mod;
         this.dialog = dialog;
 
-        if (mod.getDescription() != null && !mod.getDescription().isEmpty()) {
-            this.setToolTipText(new HTMLBuilder().text(mod.getDescription()).split(100).build());
-        }
+        refreshToolTip();
 
         if (this.dialog != null) {
             // built on right-click: building a menu for every row made opening and reloading Edit Mods slow
@@ -163,14 +173,117 @@ public class ModsJCheckBox extends JCheckBox {
 
     public void setUpdateStatus(DisableableMod.UpdateStatus updateStatus) {
         this.updateStatus = updateStatus;
-
-        String description = getDisableableMod().getDescription();
-        String tooltip = updateStatus == DisableableMod.UpdateStatus.AVAILABLE
-                ? GetText.tr("Update available") + (description.isEmpty() ? "" : "<br/><br/>" + description)
-                : description;
-        setToolTipText(tooltip.isEmpty() ? null : new HTMLBuilder().text(tooltip).split(100).build());
-
+        refreshToolTip();
         repaint();
+    }
+
+    /**
+     * Sets the mod's side by hand (null is Auto) and redraws its tag. The caller saves the instance.
+     */
+    public void setSide(ModSide side) {
+        getDisableableMod().side = side;
+        refreshToolTip();
+        revalidate();
+        repaint();
+    }
+
+    // the update notice, the side and where it came from, then the description
+    private void refreshToolTip() {
+        DisableableMod disableableMod = getDisableableMod();
+        List<String> lines = new ArrayList<>();
+
+        if (updateStatus == DisableableMod.UpdateStatus.AVAILABLE) {
+            lines.add(GetText.tr("Update available"));
+        }
+
+        ModSide side = disableableMod.getEffectiveSide();
+        if (side != null) {
+            // #. {0} is where a mod is needed (e.g. Client Only), {1} where that came from (e.g. Modrinth)
+            lines.add(GetText.tr("Side: {0} ({1})", side, sideSource(disableableMod)));
+        }
+
+        if (!disableableMod.getDescription().isEmpty()) {
+            lines.add(disableableMod.getDescription());
+        }
+
+        setToolTipText(lines.isEmpty() ? null
+                : new HTMLBuilder().text(String.join("<br/><br/>", lines)).split(100).build());
+    }
+
+    // same order as DisableableMod.getEffectiveSide: by hand, then Modrinth, then CurseForge
+    private static String sideSource(DisableableMod mod) {
+        if (mod.side != null) {
+            return GetText.tr("set by you");
+        }
+
+        return mod.modrinthProject != null
+                && ModSide.fromModrinth(mod.modrinthProject.clientSide, mod.modrinthProject.serverSide) != null
+                        ? "Modrinth"
+                        : "CurseForge";
+    }
+
+    // a small tag after the name of mods only one side needs; mods for both, or unknown, get none
+    private String sideTag() {
+        ModSide side = mod instanceof DisableableMod ? ((DisableableMod) mod).getEffectiveSide() : null;
+
+        return side == ModSide.CLIENT ? GetText.tr("Client") : side == ModSide.SERVER ? GetText.tr("Server") : null;
+    }
+
+    private Font tagFont() {
+        return getFont().deriveFont(getFont().getSize2D() * 0.8f);
+    }
+
+    // the gap before the tag, then its text with padding either side
+    private int tagWidth(String tag) {
+        return UIScale.scale(TAG_GAP) + getFontMetrics(tagFont()).stringWidth(tag) + UIScale.scale(TAG_PADDING) * 2;
+    }
+
+    private Dimension withTag(Dimension size) {
+        String tag = sideTag();
+
+        return tag == null ? size : new Dimension(size.width + tagWidth(tag), size.height);
+    }
+
+    @Override
+    public Dimension getPreferredSize() {
+        return withTag(super.getPreferredSize());
+    }
+
+    // BoxLayout won't make a row wider than this, so it has to leave room for the tag too
+    @Override
+    public Dimension getMaximumSize() {
+        return withTag(super.getMaximumSize());
+    }
+
+    @Override
+    protected void paintComponent(Graphics g) {
+        super.paintComponent(g);
+
+        String tag = sideTag();
+        if (tag == null) {
+            return;
+        }
+
+        Graphics2D g2 = (Graphics2D) g.create();
+        try {
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+            g2.setFont(tagFont());
+            g2.setColor(UIManager.getColor("Label.disabledForeground"));
+
+            FontMetrics metrics = g2.getFontMetrics();
+            int padding = UIScale.scale(TAG_PADDING);
+            // the name ends where the check box's own layout puts it: its width without the tag, less the inset
+            int x = super.getPreferredSize().width - getInsets().right + UIScale.scale(TAG_GAP);
+            int width = metrics.stringWidth(tag) + padding * 2;
+            int height = metrics.getHeight();
+            int y = (getHeight() - height) / 2;
+
+            g2.drawRoundRect(x, y, width - 1, height - 1, UIScale.scale(6), UIScale.scale(6));
+            g2.drawString(tag, x + padding, y + metrics.getAscent());
+        } finally {
+            g2.dispose();
+        }
     }
 
     // the look and feel's check box, then the update icon or blank space the same size
@@ -367,6 +480,9 @@ public class ModsJCheckBox extends JCheckBox {
             }
         }
 
+        contextMenu.add(createSideMenu());
+        contextMenu.add(new JPopupMenu.Separator());
+
         JMenuItem enableDisableButton = new JMenuItem(
                 getDisableableMod().disabled ? GetText.tr("Enable") : GetText.tr("Disable"));
         enableDisableButton.addActionListener(e -> {
@@ -483,6 +599,34 @@ public class ModsJCheckBox extends JCheckBox {
         }
 
         return contextMenu;
+    }
+
+    // Auto, then each side by hand; acts on every selected row when this one is selected, else on this one
+    private JMenu createSideMenu() {
+        List<ModsJCheckBox> rows = dialog.rowsForMenu(this);
+        ModSide platformSide = getDisableableMod().getPlatformSide();
+
+        JMenu sideMenu = new JMenu(rows.size() == 1 ? GetText.tr("Side")
+                // #. {0} is the number of mods selected
+                : GetText.tr("Side ({0} Mods)", rows.size()));
+        ButtonGroup group = new ButtonGroup();
+
+        for (ModSide side : new ModSide[] { null, ModSide.BOTH, ModSide.CLIENT, ModSide.SERVER }) {
+            String label = side != null ? side.toString()
+                    : rows.size() > 1 ? GetText.tr("Auto")
+                            // #. {0} is the side the mod platform gives (e.g. Client Only)
+                            : GetText.tr("Auto ({0})", platformSide == null ? GetText.tr("Unknown") : platformSide);
+
+            JRadioButtonMenuItem item = new JRadioButtonMenuItem(label, getDisableableMod().side == side);
+            item.addActionListener(e -> {
+                rows.forEach(row -> row.setSide(side));
+                dialog.instanceOrServer.save();
+            });
+            group.add(item);
+            sideMenu.add(item);
+        }
+
+        return sideMenu;
     }
 
     @Override

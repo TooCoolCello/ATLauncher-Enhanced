@@ -958,6 +958,9 @@ public class Server implements ModManagement {
             }
         }
 
+        // an update replaces the entry below, so keep a side set by hand
+        ModSide manualSide = DisableableMod.manualSideOf(this.mods, mod.id, null);
+
         // remove any mods that are from the same mod on CurseForge from the master mod
         // list
         this.mods = this.mods.stream()
@@ -968,6 +971,7 @@ public class Server implements ModManagement {
             mod.getRootCategoryId() == Constants.CURSEFORGE_DATA_PACKS_SECTION_ID ? Type.datapack
                 : mod.getRootCategoryId() == Constants.CURSEFORGE_PLUGINS_SECTION_ID ? Type.plugins : Type.mods,
             null, mod.summary, false, true, true, false, mod, file);
+        dm.side = manualSide;
 
         // check for mod on Modrinth
         if (!App.settings.dontCheckModsOnModrinth) {
@@ -1059,6 +1063,9 @@ public class Server implements ModManagement {
             download.copy();
         }
 
+        // an update replaces the entry below, so keep a side set by hand
+        ModSide manualSide = DisableableMod.manualSideOf(this.mods, null, project.id);
+
         // remove any mods that are from the same mod from the master mod list
         this.mods = this.mods.stream().filter(
                 installedMod -> !installedMod.isFromModrinth()
@@ -1068,6 +1075,7 @@ public class Server implements ModManagement {
         DisableableMod dm = new DisableableMod(project.title, version.name, true, fileToDownload.filename,
             modType,
             null, project.description, false, true, true, false, project, version);
+        dm.side = manualSide;
 
         // check for mod on CurseForge
         if (!App.settings.dontCheckModsOnCurseForge) {
