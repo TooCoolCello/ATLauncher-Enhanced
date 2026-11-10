@@ -46,6 +46,7 @@ import org.mini2Dx.gettext.GetText;
 
 import com.atlauncher.App;
 import com.atlauncher.data.Instance;
+import com.atlauncher.gui.components.WrappingLabel;
 import com.atlauncher.managers.LogManager;
 import com.atlauncher.utils.DefaultConfigsFromWorld;
 import com.atlauncher.utils.DefaultConfigsFromWorld.DefaultConfig;
@@ -91,9 +92,11 @@ public final class ManageWorldConfigDefaultsDialog extends JDialog {
         setSize(680, 440);
         setLocationRelativeTo(parent);
 
-        JLabel explanation = new JLabel("<html><div style='width:600px'>" + GetText.tr("New worlds created in this "
+        // wraps to the dialog's width, which can be narrower than the text (down to its minimum size)
+        WrappingLabel explanation = new WrappingLabel();
+        explanation.setWrappedText(GetText.tr("New worlds created in this "
             + "instance start with these server configs, from its defaultconfigs folder. Existing worlds keep their "
-            + "own.") + "</div></html>");
+            + "own."));
 
         list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         list.getAccessibleContext().setAccessibleName(GetText.tr("Current Default Configs"));
